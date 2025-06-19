@@ -153,10 +153,12 @@ app.post("/designersSignUp", async (req, res) => {
       designerId: `DD${
         userIdNo.toString().length == 1 ? "0" + userIdNo : userIdNo
       }`,
-      ...userDetails,
-      isApplicationApproved: false,
+      ...userDetails
     });
-    res.status(200).json({ message: "Successfully signed up" });
+
+    if (newUser){res.status(200).json({ message: "Successfully signed up" })}else{ invalid();
+      throw new Error("Could not sign up");};
+
   } catch (error) {
     console.error("Error signining designer up: ", error);
     res.status(status).json({ message: message });
@@ -215,7 +217,7 @@ app.get("/designersLogin", async (req, res) => {
     const invalid = () => {
       status = 401;
       message = "invalid input";
-    };
+    }; 
 
     if (!desEmail || !desPassword) {
       invalid();
@@ -247,8 +249,12 @@ app.get("/designersLogin", async (req, res) => {
 //getting all stock products so it can be displayed on the product pages
 app.get("/stockProducts", async (req, res) => {
   try {
-    const stockProducts = db.collection("stockProducts");
-    res.status(200).json(await stockProducts.find({}).toArray());
+    const stockProductsCol = db.collection("stockProducts");
+    const stockProducts = await stockProductsCol.find({}).toArray();
+
+    if(stockProducts){
+    res.status(200).json(stockProducts);} else {
+      throw new Error("Error getting products");}
   } catch (error) {
     console.error("Error getting all stock products: ", error);
     res.status(500).json({ message: "Internal server error" });
@@ -258,8 +264,12 @@ app.get("/stockProducts", async (req, res) => {
 //getting all designers products so it can be displayed on the product pages
 app.get("/designersProducts", async (req, res) => {
   try {
-    const designersProducts = db.collection("designersProducts");
-    res.status(200).json(await designersProducts.find({}).toArray());
+    const designersProductsCol = db.collection("designersProducts");
+    const designersProducts = await stockProductsCol.find({onsale:true}).toArray()
+
+   if (designersProducts){
+    res.status(200).json(stockProducts);} else {
+      throw new Error("No products to display");}
   } catch (error) {
     console.error("Error getting all designers products: ", error);
     res.status(500).json({ message: "Internal server error" });
@@ -393,7 +403,7 @@ app.post("/usersBankDetails/:customerId", async (req, res) => {
       message = "invalid input";
     };
 
-    const details = req.body;
+    const details = req.body;//cvv: cardNumber:
     const custId = req.params.customerId;
 
     if (details.cardNumber.replaceAll(" ", "").length !== 16) {
@@ -441,7 +451,7 @@ app.post("/saveAddress/:customerId", async (req, res) => {
       message = "invalid input";
     };
 
-    const details = req.body;
+    const details = req.body;//streetAddress: suburb: city: postalCode:
     const custId = req.params.customerId;
 
     const address = await db
@@ -457,18 +467,58 @@ app.post("/saveAddress/:customerId", async (req, res) => {
 //posting order details of the checked out items
 app.post("/orders/:customerId", async (req, res) => {
   try {
-    const details = req.body;
+    const orderDetails = req.body; //paymentMethod: ,purchasedProducts:[{productId,quantity,size}]
     const custId = req.params.customerId;
-    const order = await db
+
+    const productDetails = orderDetails.purchasedProducts
+    const purchasedProducts = [];
+    let total = 0 ;
+   
+    for ( i of productDetails) {
+      let product = {};
+      product.productId = i.productId;
+
+      product =  i.productId.startsWith("SP")? await db.collection("stockProducts").findOne({stockProductId:i.productId},{projection: {name:1,price:1,itemsInStock:1,_id:0}}):
+        await db.collection("designersProducts").findOne({designerProductId:i.productId},{projection: {name:1,price:1,itemsInStock:1,_id:0}})
+
+     
+      
+
+      product.itemsInStock[i.size] = product.itemsInStock[i.size] - i.quantity;
+      console.log(product.itemsInStock[i.size]) ;
+      total += product.price * i.quantity;
+      if (i.productId.startsWith("SP")) {
+        await db.collection("stockProducts").updateOne({stockProductId:i.productId},{$set:{itemsInStock: product.itemsInStock}})
+      } else {
+        await db.collection("designersProducts").updateOne({stockProductId:i.productId},{$set:{itemsInStock: product.itemsInStock}})
+      }
+
+      delete product.itemsInStock
+      product.size = i.size
+      product.quantity = i.quantity
+      purchasedProducts.push(product)
+
+
+    }
+
+    const address = await db.collection("customersAddress").findOne({customerId:custId},{projection:{customerId:0,_id:0}});
+    const bankDetails = await db.collection("usersBankDetails").findOne({customerId:custId},{projection:{customerId:0,_id:0}});
+    
+    const orderResult = await db
       .collection("orders")
       .insertOne({
         customerId: custId,
-        ...details,
+        address: {...address},
+        bankDetails: {...bankDetails},
+        paymentMethod: orderDetails.paymentMethod,
+        purchasedProducts:purchasedProducts,
+        totalAmount: total,
         dateOfPurchase: new Date(),
         dateOfDelivery: null,
         statusOfExchange: "is being processed",
       });
-    res.status(200).json(order);
+   
+    res.status(200).json(orderResult);
   } catch (error) {
     console.error("error creating order", error);
     res.status(500).json({ message: "Internal Server Error" });
@@ -489,6 +539,8 @@ app.get("/orders/:orderId", async (req, res) => {
   }
 });
 
+
+
 //posting a review a user leaves
 app.post("/reviews/:customerId/:productId", async (req, res) => {
   let status = 500;
@@ -498,7 +550,7 @@ app.post("/reviews/:customerId/:productId", async (req, res) => {
       status = 401;
       message = "invalid operation";
     };
-    const review = req.body;
+    const review = req.body;//review,rating
     const custId = req.params.customerId;
     const prodId = req.params.productId;
     const productDetails = await db
@@ -564,7 +616,7 @@ app.get("/designersProducts/:designerId", async (req, res) => {
 //creating a new designer product
 app.post("/designersProducts/:designerId",async (req, res) => {
    try {
-    const newItem = req.body;
+    const newItem = req.body;//
     const desId = req.params.designerId;
     const designersCol = db.collection("designers")
     let desIdNo = await designersCol.find({}).toArray();
