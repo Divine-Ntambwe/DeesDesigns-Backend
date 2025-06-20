@@ -24,8 +24,43 @@ async function connectToMongo() {
   console.log("connected to mongodb");
 }
 
-//posting sign up details to customers collection if user is a customer
 
+async function basicAuth(req,res,next){
+  const authHeader = req.headers.authorization; //gets authorization method if there is any(-H'Authorization:'<auth methods>...)
+  
+  if (!authHeader || !authHeader.startsWith("Basic ")) { //checks if there is an auth method and checks if it's basic
+    return res.status(401).json({message:"Authorization header missing or invalid"})
+  }
+  
+  //spliiting the credentials into user and password
+  const base64Credentials = authHeader.split(" ")[1];
+  const credentials = base64.decode(base64Credentials).split(":");
+  const email = credentials[0];
+  const password = credentials[1];
+
+  //checking if email exists and password is correct
+  const customersCol = db.collection("customers");
+  const cust = await customersCol.findOne({email: email})
+
+  const designersCol = db.collection("designers");
+  const des = await designersCol.findOne({email: email})
+
+  if (!cust && !des){
+    return res.status(401).json({message: "user not found"})
+  }
+
+  const decodedPW = cust? base64.decode(cust.password) : base64.decode(des.password)  ;
+
+  if (decodedPW !== password){
+    return res.status(401).json({message:"Invalid Password"});
+  }
+
+  req.user = cust || des;
+  next();
+
+}
+
+//posting sign up details to customers collection if user is a customer
 app.post("/customersSignUp", async (req, res) => {
   let status = 500;
   let message = "Internal server error";
@@ -164,6 +199,9 @@ app.post("/designersSignUp", async (req, res) => {
     res.status(status).json({ message: message });
   }
 });
+app.use(basicAuth);
+
+
 
 //getting a single user by their email so the password can be checked if user is a customer
 app.get("/customerLogin", async (req, res) => {
@@ -206,45 +244,6 @@ app.get("/customerLogin", async (req, res) => {
   }
 });
 
-//getting a single designer by their email so the password can be checked
-app.get("/designersLogin", async (req, res) => {
-  let status = 500;
-  let message = "Internal server error";
-  try {
-    const designersCol = db.collection("designers");
-    const desEmail = req.query.email;
-    const desPassword = req.query.password;
-    const invalid = () => {
-      status = 401;
-      message = "invalid input";
-    }; 
-
-    if (!desEmail || !desPassword) {
-      invalid();
-      throw new Error("enter email and password");
-    }
-
-    const des = await designersCol.findOne(
-      { email: desEmail },
-      { email: 1, password: 1 }
-    );
-    if (!des) {
-      invalid();
-      throw new Error("Email does not exist");
-    }
-
-    const decodedPassword = base64.decode(des.password);
-    if (decodedPassword !== desPassword) {
-      invalid();
-      throw new Error("incorrect password");
-    }
-
-    res.status(200).json({ message: "successfully logged in" });
-  } catch (error) {
-    console.error("Error logging designer in: ", error);
-    res.status(status).json({ message: message });
-  }
-});
 
 //getting all stock products so it can be displayed on the product pages
 app.get("/stockProducts", async (req, res) => {
@@ -257,18 +256,18 @@ app.get("/stockProducts", async (req, res) => {
       throw new Error("Error getting products");}
   } catch (error) {
     console.error("Error getting all stock products: ", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message:"Internal server error" });
   }
 });
 
 //getting all designers products so it can be displayed on the product pages
-app.get("/designersProducts", async (req, res) => {
+app.get("/allDesignerProducts", async (req, res) => {
   try {
     const designersProductsCol = db.collection("designersProducts");
-    const designersProducts = await stockProductsCol.find({onsale:true}).toArray()
+    const designersProducts = await designersProductsCol.find({onsale:true}).toArray()
 
    if (designersProducts){
-    res.status(200).json(stockProducts);} else {
+    res.status(200).json(designersProducts);} else {
       throw new Error("No products to display");}
   } catch (error) {
     console.error("Error getting all designers products: ", error);
@@ -321,7 +320,7 @@ app.get("/reviews/:productId", async (req, res) => {
 //posting to cart database when user adds an item to cart
 app.post("/addToCart/:customerId/:productId", async (req, res) => {
   try {
-    const cartItem = req.body;
+    const cartItem = req.body; //quantity,size
     const custId = req.params.customerId;
     const prodId = req.params.productId;
     const quantity = cartItem.quantity;
@@ -403,7 +402,7 @@ app.post("/usersBankDetails/:customerId", async (req, res) => {
       message = "invalid input";
     };
 
-    const details = req.body;//cvv: cardNumber:
+    const details = req.body;//cvv: cardNumber: expiryDate:YYYY-MM-DD
     const custId = req.params.customerId;
 
     if (details.cardNumber.replaceAll(" ", "").length !== 16) {
@@ -424,16 +423,17 @@ app.post("/usersBankDetails/:customerId", async (req, res) => {
       invalid();
       throw new Error("Invalid CVV number");
     }
-    const expDate = new Date(details.expiryDate);
+    const expDate = new Date(details.expiryDate) ;
+    console.log(new Date())
     if (expDate < new Date()) {
       invalid();
       throw new Error("Credit card is already expired");
     }
     delete details.expiryDate;
-    details = await db
+    result = await db
       .collection("usersBankDetails")
       .insertOne({ userId: custId, ...details, expiryDate: expDate });
-    res.status(200).json(details);
+    res.status(200).json(result);
   } catch (error) {
     console.error(" error saving bank details", error);
     res.status(status).json({ message: message });
@@ -442,25 +442,18 @@ app.post("/usersBankDetails/:customerId", async (req, res) => {
 
 //posting new address
 app.post("/saveAddress/:customerId", async (req, res) => {
-  let status = 500;
-  let message = "Internal server error";
 
   try {
-    const invalid = () => {
-      status = 401;
-      message = "invalid input";
-    };
-
     const details = req.body;//streetAddress: suburb: city: postalCode:
-    const custId = req.params.customerId;
+    const customerId = req.params.customerId;
 
     const address = await db
       .collection("customersAddress")
-      .insertOne({ custId, ...details });
+      .insertOne({ customerId, ...details });
     res.status(200).json(address);
   } catch (error) {
     console.error("error saving address details", error);
-    res.status(status).json({ message: message });
+    res.status(500).json({ message: "Internal Server error" });
   }
 });
 
@@ -526,7 +519,7 @@ app.post("/orders/:customerId", async (req, res) => {
 });
 
 //getiing details of a specific order
-app.get("/orders/:orderId", async (req, res) => {
+app.get("/order/:orderId", async (req, res) => {
   try {
     const id = req.params.orderId;
     const details = await db
@@ -542,7 +535,7 @@ app.get("/orders/:orderId", async (req, res) => {
 
 
 //posting a review a user leaves
-app.post("/reviews/:customerId/:productId", async (req, res) => {
+app.post("/uploadReview/:customerId/:productId", async (req, res) => {
   let status = 500;
   let message = "Internal server error";
   try {
@@ -558,7 +551,7 @@ app.post("/reviews/:customerId/:productId", async (req, res) => {
       .findOne({ customerId: custId });
     if (!productDetails) {
       invalid();
-      throw new Erorr(
+      throw new Error(
         "You can not write a review as you have not received this product"
       );
     }
@@ -572,7 +565,7 @@ app.post("/reviews/:customerId/:productId", async (req, res) => {
 
     if (!found) {
       invalid();
-      throw new Erorr(
+      throw new Error(
         "You can not write a review as you have not received this product"
       );
     }
@@ -594,6 +587,81 @@ app.post("/reviews/:customerId/:productId", async (req, res) => {
     res.status(200).json({ message: "successfully uploaded" });
   } catch (error) {
     console.error("error creating review", error);
+    res.status(status).json({ message: message });
+  }
+});
+
+async function basicAuthDes(req,res,next){
+  const authHeader = req.headers.authorization; //gets authorization method if there is any(-H'Authorization:'<auth methods>...)
+  
+  if (!authHeader || !authHeader.startsWith("Basic ")) { //checks if there is an auth method and checks if it's basic
+    return res.status(401).json({message:"Authorization header missing or invalid"})
+  }
+
+  //spliiting the credentials into user and password
+  const base64Credentials = authHeader.split(" ")[1];
+  const credentials = base64.decode(base64Credentials).split(":");
+  const email = credentials[0];
+  const password = credentials[1];
+
+  //checking if email exists and password is correct
+  const designersCol = db.collection("designers");
+  const des = await designersCol.findOne({email: email})
+  res.send(await designersCol.find({}).toArray())
+
+  if (!des){
+    return res.status(401).json({message: "user not found"})
+  }
+
+  const decodedPW = base64.decode(des.password);
+
+  if (decodedPW !== password){
+    return res.status(401).json({message:"Invalid Password"});
+  }
+
+  req.user = des;
+  next();
+
+}
+
+
+
+//getting a single designer by their email so the password can be checked
+app.get("/designersLogin", async (req, res) => {
+  let status = 500;
+  let message = "Internal server error";
+  try {
+    const designersCol = db.collection("designers");
+    const desEmail = req.query.email;
+    const desPassword = req.query.password;
+    const invalid = () => {
+      status = 401;
+      message = "invalid input";
+    }; 
+
+    if (!desEmail || !desPassword) {
+      invalid();
+      throw new Error("enter email and password");
+    }
+
+    const des = await designersCol.findOne(
+      { email: desEmail },
+      { email: 1, password: 1 }
+    );
+    if (!des) {
+      invalid();
+      throw new Error("Email does not exist");
+    }
+
+    const decodedPassword = base64.decode(des.password);
+    if (decodedPassword !== desPassword) {
+      invalid();
+      throw new Error("incorrect password");
+    }
+
+    res.status(200).json({ message: "successfully logged in" });
+  } catch (error) {
+    console.error("Error logging designer in: ", error);
     res.status(status).json({ message: message });
   }
 });
@@ -625,7 +693,7 @@ app.post("/designersProducts/:designerId",async (req, res) => {
     const result = {
       designerProductId: `DP${
         desIdNo.toString().length == 1 ? "0" + desIdNo : desIdNo
-      }`,desId,...newItem, onSale: true
+      }`,designerId: desId,...newItem, onSale: true
     };
 
     await designersCol.insertOne(result);
@@ -642,7 +710,7 @@ app.put("/removeDesignersProducts/:designerProductId", async (req, res) => {
     const desProdId = req.params.designerProductId;
     await db
       .collection("designersProducts")
-      .updateOne({ _id: new mongodb.ObjectId(desProdId) },{$set:{onSale:false}});
+      .updateOne({ designerProductId:desProdId },{$set:{onSale:false}});
     res.status(200).json({ message: "successfully deleted" });
   } catch (error) {
     console.error("error deleting a designer's product", error);
@@ -658,7 +726,7 @@ app.put("/editDesignerProductDetails/:designerProductId", async (req, res) => {
     await db
       .collection("designersProducts")
       .updateOne(
-        { _id: new mongodb.ObjectId(desProdId) },
+        { designerProductId: desProdId },
         { $set: { ...updates } }
       );
     res.status(200).json({ message: "successfully updated" });
@@ -682,4 +750,5 @@ app.get("/designerContactInfo/:designerId", async (req, res) => {
 app.listen(port, async () => {
   console.log(`The server has started on http://localhost:${port}`);
   await connectToMongo();
+ 
 });
