@@ -202,45 +202,12 @@ app.post("/designersSignUp", async (req, res) => {
 app.use(basicAuth);
 
 
-
-//getting a single user by their email so the password can be checked if user is a customer
-app.get("/customerLogin", async (req, res) => {
-  let status = 500;
-  let message = "Internal server error";
+app.get("/userLogin", async (req, res) => {
   try {
-    const customersCol = db.collection("customers");
-    const custEmail = req.query.email;
-    const custPassword = req.query.password;
-
-    const invalid = () => {
-      status = 401;
-      message = "invalid input";
-    };
-
-    if (!custEmail || !custPassword) {
-      invalid();
-      throw new Error("enter email and password");
-    }
-
-    const cust = await customersCol.findOne(
-      { email: custEmail },
-      { email: 1, password: 1 }
-    );
-    if (!cust) {
-      invalid();
-      throw new Error("Email does not exist");
-    }
-
-    const decodedPassword = base64.decode(cust.password);
-    if (decodedPassword !== custPassword) {
-      invalid();
-      throw new Error("incorrect password");
-    }
-
-    res.status(200).json({ message: "successfully logged in" });
+    res.status(200).json({ message: "successfully logged in",user: req.user["designerId" || "customerId"] });
   } catch (error) {
-    console.error("Error logging customer in: ", error);
-    res.status(status).json({ message: message });
+    console.error("Error logging user in: ", error);
+    res.status(500).json("Internal Server Error");
   }
 });
 
@@ -587,81 +554,6 @@ app.post("/uploadReview/:customerId/:productId", async (req, res) => {
     res.status(200).json({ message: "successfully uploaded" });
   } catch (error) {
     console.error("error creating review", error);
-    res.status(status).json({ message: message });
-  }
-});
-
-async function basicAuthDes(req,res,next){
-  const authHeader = req.headers.authorization; //gets authorization method if there is any(-H'Authorization:'<auth methods>...)
-  
-  if (!authHeader || !authHeader.startsWith("Basic ")) { //checks if there is an auth method and checks if it's basic
-    return res.status(401).json({message:"Authorization header missing or invalid"})
-  }
-
-  //spliiting the credentials into user and password
-  const base64Credentials = authHeader.split(" ")[1];
-  const credentials = base64.decode(base64Credentials).split(":");
-  const email = credentials[0];
-  const password = credentials[1];
-
-  //checking if email exists and password is correct
-  const designersCol = db.collection("designers");
-  const des = await designersCol.findOne({email: email})
-  res.send(await designersCol.find({}).toArray())
-
-  if (!des){
-    return res.status(401).json({message: "user not found"})
-  }
-
-  const decodedPW = base64.decode(des.password);
-
-  if (decodedPW !== password){
-    return res.status(401).json({message:"Invalid Password"});
-  }
-
-  req.user = des;
-  next();
-
-}
-
-
-
-//getting a single designer by their email so the password can be checked
-app.get("/designersLogin", async (req, res) => {
-  let status = 500;
-  let message = "Internal server error";
-  try {
-    const designersCol = db.collection("designers");
-    const desEmail = req.query.email;
-    const desPassword = req.query.password;
-    const invalid = () => {
-      status = 401;
-      message = "invalid input";
-    }; 
-
-    if (!desEmail || !desPassword) {
-      invalid();
-      throw new Error("enter email and password");
-    }
-
-    const des = await designersCol.findOne(
-      { email: desEmail },
-      { email: 1, password: 1 }
-    );
-    if (!des) {
-      invalid();
-      throw new Error("Email does not exist");
-    }
-
-    const decodedPassword = base64.decode(des.password);
-    if (decodedPassword !== desPassword) {
-      invalid();
-      throw new Error("incorrect password");
-    }
-
-    res.status(200).json({ message: "successfully logged in" });
-  } catch (error) {
-    console.error("Error logging designer in: ", error);
     res.status(status).json({ message: message });
   }
 });
