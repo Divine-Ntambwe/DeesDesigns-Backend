@@ -6,12 +6,29 @@ const app = express();
 const base64 = require("base-64")
 const port =  process.env.port || 5000 ;
 const uri = process.env.MONGODB_DEEINDER;
-const cors = require("cors")
+const cors = require("cors");
+
+
+const multer = require('multer');
+const path = require('path');
+const {v4:uuidv4} = require('uuid')
+
+const storage = multer.diskStorage({
+ destination: (req,file,cb)=>{
+    cb(null,'uploads')
+ },
+ filename: (req,file,cb) => {
+    cb(null,(uuidv4()+ file.originalname));
+    
+ }
+})
+const upload = multer({storage:storage})
+app.use('/uploads', express.static('uploads'));
+
 app.use(cors())
 app.use(express.json())
 
-let foundEmail = false ;
-let currentMemberId;
+
 
 let client,db
 
@@ -53,83 +70,80 @@ async function basicAUth(req,res,next) {
 }
 
 //signing up
-app.post("/signUp", async(req,res)=>{
+app.post("/signUp",upload.single('pfp'),async(req,res)=>{
     let status = 500;
     let message = "Internal server error"
-    const invalid = () => {
+    const invalid = (m) => {
         status = 401
-        message = "Invalid input"
+        message = m
     }
-    try {
-   //fullname:username:email:password:confirmPassword:phoneNumber:gender:dateOfBirth
-   const memDetails = req.body
+    try { 
+   const memDetails = JSON.parse(req.body.details);
    const membersInfoCol = db.collection("membersPersonalInfo");
-   let {fullName,username,email,password,confirmPassword,phoneNumber,gender,dateOfBirth} = memDetails
+   let {fullName,username,email,password,confirmPassword,gender,dob} = memDetails
 
    if (!email.indexOf("@")){
-      invalid()
+      invalid("Invalid email")
       throw new Error("Invalid email")
    }
     
    const isEmailExists = await membersInfoCol.findOne({email});
 
     if (isEmailExists) {
-        invalid()
+        invalid("Email already exists please log in")
         throw new Error("Email already exists please log in")
     }
 
     if ( password.match(/\d/g) == null || password.match(/\D/g) == null || password.match(/([\W]|_)/g) == null) {
-        invalid();
+        invalid("Password should include numbers and letters and symbols");
         throw new Error("Password should include numbers and letters and symbols");
         }
 
     if (password !== confirmPassword) {
-        invalid()
+        invalid("passwords do not match")
         throw new Error("passwords do not match")
     }
 
     const isUsernameExists = await membersInfoCol.findOne({username});
 
     if (isUsernameExists) {
-        invalid()
+        invalid("username already taken")
         throw new Error("username already taken")
     }
 
-    if (phoneNumber.replaceAll(" ","").length !== 10 || !phoneNumber.startsWith("0") || phoneNumber.match(/\D/) !== null) {
-        invalid()
-        throw new Error("invalid phone number")
-    }
     let today = new Date()
     let minDate = new Date(today.setFullYear(today.getFullYear() - 18))
 
-    dateOfBirth = new Date(dateOfBirth)
-    if (dateOfBirth > minDate) {
-        invalid()
-        throw new Error("You need to be above 18 to use this wesbite")
+    dob = new Date(dob)
+    if (dob > minDate) {
+        invalid("You need to be above 18 to use this wesbite")
+        throw new Error("You need to be above 18 to use this site")
     }
     
     delete memDetails.confirmPassword
     memDetails.password = base64.encode(password);
-    memDetails.dateOfBirth = dateOfBirth
+    memDetails.dob = dob
     today = new Date()
-    let age = (today.getFullYear() - dateOfBirth.getFullYear())
-    age = dateOfBirth.setFullYear(today.getFullYear()) > today? age-1:age;
+    let age = (today.getFullYear() - dob.getFullYear())
+    age = dob.setFullYear(today.getFullYear()) > today? age-1:age;
     
-   
-    const result = await membersInfoCol.insertOne({...memDetails,age})
+    const pfpPath = req.file.path
+    console.log(pfpPath)
+    const result = await membersInfoCol.insertOne({...memDetails,age,pfpPath})
     const result2 = await db.collection("membersProfile").insertOne({"memberId":result["insertedId"],username, relationshipIntent:null, shortDescription:null, interests: [],aboutMe:{},likes:0,connections:0})
-    res.status(200).json(result)
+    res.status(200).json({message:"successfully signed up"})
+   
 
     } catch(error) {
         console.error("Error signing user up",error)
-        res.status(status).send({message:message})
-    }
+        res.status(status).send({error:message})
+    }  
    
 })
 
 //logging in (checking password and email)
 app.post("/login",async (req,res)=>{
-
+    console.log(req.body)
     let status = 500;
     let message = "Internal server error"
     const invalid = (m) => {
@@ -149,7 +163,7 @@ app.post("/login",async (req,res)=>{
 
     const user = await membersCol.findOne(
       {email},
-      {projection:{ email: 1, password: 1 }}
+      {projection:{ email: 1, password: 1, username: 1 }}
     );
     if (!user) {
       invalid("Email does not exist, please sign up");
@@ -162,7 +176,7 @@ app.post("/login",async (req,res)=>{
       throw new Error("Incorrect password");
     }
 
-    res.status(200).json({message:"successfully signed in",user})
+    res.status(200).json({message:"successfully signed in",...user})
     }catch(error) {
     console.error("Error logging user in",error)
     res.status(status).json({error:message})
@@ -170,7 +184,11 @@ app.post("/login",async (req,res)=>{
 
 })
 
-//app.use(basicAUth);
+// app.use(basicAUth);
+app.post("/UploadPfp",upload.single('pfp'), async (req,res)=>{
+ res.status(200).json(req.file)
+});
+
 
 //getting all members profiles to display on home page
 app.get("/membersProfiles",async (req,res)=>{
@@ -179,7 +197,7 @@ app.get("/membersProfiles",async (req,res)=>{
      const membersInfoCol = db.collection("membersPersonalInfo");
 
      const profiles = await memProfilesCol.find({},{projection:{relationshipIntent: 1,likes:1,shortDescription:1}}).toArray();
-     const membersInfo = await membersInfoCol.find({},{projection:{age:1,fullName:1,username:1}}).toArray();
+     const membersInfo = await membersInfoCol.find({},{projection:{age:1,fullName:1,username:1,gender:1,pfpPath:1}}).toArray();
 
      let members = [];
      for (let i = 0; i < membersInfo.length ; i++) {
@@ -208,8 +226,8 @@ app.get("/memberProfile/:username",async(req,res)=>{
     const membersInfoCol = db.collection("membersPersonalInfo");
     const username = req.params.username
 
-     const profile = await memProfilesCol.findOne({username: username},{projection:{"_id":0,}});
-     const memberInfo = await membersInfoCol.findOne({username},{projection:{age:1,fullName:1,username:1}});
+     const profile = await memProfilesCol.findOne({username},{});
+     const memberInfo = await membersInfoCol.findOne({username},{projection:{age:1,fullName:1,username:1,pfpPath:1}});
 
      let member = {...memberInfo,...profile};
      if (memberInfo) {
