@@ -4,9 +4,11 @@ const bodyParser = require("body-parser");
 const mongodb = require("mongodb");
 const base64 = require("base-64");
 const app = express();
+const cors  = require("cors")
 app.use(express.json());
+app.use(cors);
 
-const port = process.env.port || 3000;
+const port = process.env.port || 5000;
 
 const uri = process.env.DEESDESIGNS_CONNECTION_STRING;
 let client, db;
@@ -113,14 +115,10 @@ app.post("/customersSignUp", async (req, res) => {
     userDetails.password = base64.encode(userDetails.password);
 
     delete userDetails.confirmPassword;
-    let userIdNo = await customersCol.find({}).toArray();
-    userIdNo = userIdNo.length + 1;
     const newUser = await customersCol.insertOne({
-      customerId: `CC${
-        userIdNo.toString().length == 1 ? "0" + userIdNo : userIdNo
-      }`,
-      ...userDetails,
+      ...userDetails
     });
+
     res.status(200).json({ message: "Successfully signed up" });
   } catch (error) {
     console.error("Error signining customer up: ", error);
@@ -199,7 +197,7 @@ app.post("/designersSignUp", async (req, res) => {
     res.status(status).json({ message: message });
   }
 });
-app.use(basicAuth);
+// app.use(basicAuth);
 
 
 app.get("/userLogin", async (req, res) => {
