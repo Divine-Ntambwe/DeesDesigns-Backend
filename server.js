@@ -4,7 +4,7 @@ const bodyParser = require("body-parser");
 const mongoDb = require("mongodb");
 const app = express();
 const base64 = require("base-64");
-const port = process.env.port || 5000;
+const port = process.env.port || 8000;
 const uri = process.env.MONGODB_DEEINDER;
 const cors = require("cors");
 
@@ -179,6 +179,7 @@ app.post("/login", async (req, res) => {
       invalid("Please enter email and password");
       throw new Error("Please enter email and password");
     }
+    console.log(await membersCol.find({}).toArray())
 
     const user = await membersCol.findOne(
       { email },
@@ -210,6 +211,7 @@ app.post("/UploadPfp", upload.single("pfp"), async (req, res) => {
 //getting all members profiles to display on home page
 app.get("/membersProfiles", async (req, res) => {
   try {
+    console.log("eh?")
     const memProfilesCol = db.collection("membersProfile");
     const membersInfoCol = db.collection("membersPersonalInfo");
 
@@ -238,7 +240,7 @@ app.get("/membersProfiles", async (req, res) => {
     for (let i = 0; i < membersInfo.length; i++) {
       members.push({ ...membersInfo[i], ...profiles[i] });
     }
-
+    console.log({...members})
     res.status(200).json({ ...members });
   } catch (error) {
     console.error("error getting all members", error);
