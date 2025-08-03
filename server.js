@@ -4,9 +4,26 @@ const bodyParser = require("body-parser");
 const mongodb = require("mongodb");
 const base64 = require("base-64");
 const app = express();
-const cors  = require("cors")
+const cors  = require("cors");
+const multer = require("multer");
+const path = require("path");
+const {v4:uuidv4} = require("uuid");
 app.use(express.json());
-app.use(cors);
+app.use(cors());
+
+const storage = multer.diskStorage({
+  destination: (req,file,cb) => {
+    cb(null,'uploads')
+  },
+  filename: (req,file,cb)=> {
+    console.log(file)
+    cb(null, uuidv4() + file.originalname)
+  },
+})
+
+const upload = multer({storage});
+app.use("uploads",express.static("uploads"))
+
 
 const port = process.env.port || 5000;
 
@@ -67,49 +84,42 @@ app.post("/customersSignUp", async (req, res) => {
   let status = 500;
   let message = "Internal server error";
   try {
-    const invalid = () => {
+    const invalid = (m = "invalid input") => {
       status = 401;
-      message = "invalid input";
+      message = m;
     };
     let userDetails = req.body;
     const customersCol = db.collection("customers");
 
     if (!userDetails.email.includes("@")) {
-      invalid();
+      invalid("Invalid email");
       throw new Error("Invalid email");
     }
 
     if (await customersCol.findOne({ email: userDetails.email })) {
-      invalid();
+      invalid("User already exists please log in");
       throw new Error("User already exists please log in");
     }
 
     if (userDetails.password.length < 8) {
-      invalid();
+      invalid("Password Too Short");
       throw new Error("Password Too Short");
     }
+
     if (
       userDetails.password.match(/\d/g) == null ||
-      userDetails.password.match(/\D/g) == null ||
+      userDetails.password.match(/[a-z]|[A-Z]/g) == null ||
       userDetails.password.match(/([\W]|_)/g) == null
     ) {
-      invalid();
+      invalid("Password should include numbers and letters and symbols");
       throw new Error(
         "Password should include numbers and letters and symbols"
       );
     }
 
     if (userDetails.password !== userDetails.confirmPassword) {
-      invalid();
+      invalid("Passwords do not match");
       throw new Error("Passwords do not match");
-    }
-
-    if (
-      userDetails.phoneNumber.replaceAll(" ", "").length !== 10 ||
-      userDetails.phoneNumber.startsWith("0") == false
-    ) {
-      invalid();
-      throw new Error("Phone number is invalid");
     }
 
     userDetails.password = base64.encode(userDetails.password);
@@ -119,53 +129,62 @@ app.post("/customersSignUp", async (req, res) => {
       ...userDetails
     });
 
-    res.status(200).json({ message: "Successfully signed up" });
+    res.status(200).json({ message: "Successfully signed up", userId: newUser.insertedId });
   } catch (error) {
     console.error("Error signining customer up: ", error);
-    res.status(status).json({ message: message });
+    res.status(status).json({ error: message });
   }
 });
 
 //posting sign up details to designers collection if user is a designer
-app.post("/designersSignUp", async (req, res) => {
+app.post("/designersSignUp", upload.single("pfp"), async (req, res) => {
   let status = 500;
   let message = "Internal server error";
   try {
-    const invalid = () => {
+    const invalid = (m = "invalid input") => {
       status = 401;
-      message = "invalid input";
+      message = m;
     };
-
-    let userDetails = req.body;
+    
+    let userDetails = JSON.parse(req.body.details);
+    
     const designersCol = db.collection("designers");
 
+    console.log(userDetails)
+    for (let i in userDetails){
+      if (userDetails[i].length === 0) {
+      invalid("Please fill in all fields");
+      throw new Error("Empty input fields");
+    }
+  }
+  
     if (!userDetails.email.includes("@")) {
-      invalid();
+      invalid("Invalid email");
       throw new Error("Invalid email");
     }
 
     if (await designersCol.findOne({ email: userDetails.email })) {
-      invalid();
+      invalid("User already exists please log in");
       throw new Error("User already exists please log in");
     }
 
     if (userDetails.password.length < 8) {
-      invalid();
+      invalid("Password Too Short");
       throw new Error("Password Too Short");
     }
     if (
       userDetails.password.match(/\d/g) == null ||
-      userDetails.password.match(/\D/g) == null ||
+      userDetails.password.match(/[a-z]|[A-Z]/g) == null ||
       userDetails.password.match(/([\W]|_)/g) == null
     ) {
-      invalid();
+      invalid("Password should include numbers and letters and symbols");
       throw new Error(
         "Password should include numbers and letters and symbols"
       );
     }
 
     if (userDetails.password !== userDetails.confirmPassword) {
-      invalid();
+      invalid("Passwords do not match");
       throw new Error("Passwords do not match");
     }
 
@@ -173,41 +192,75 @@ app.post("/designersSignUp", async (req, res) => {
       userDetails.phoneNumber.replaceAll(" ", "").length !== 10 ||
       userDetails.phoneNumber.startsWith("0") == false
     ) {
-      invalid();
+      invalid("Phone number is invalid");
       throw new Error("Phone number is invalid");
     }
 
     userDetails.password = base64.encode(userDetails.password);
-
+ 
     delete userDetails.confirmPassword;
-    let userIdNo = await designersCol.find({}).toArray();
-    userIdNo = userIdNo.length + 1;
+    const pfpPath = req.file.path;
+  
     const newUser = await designersCol.insertOne({
-      designerId: `DD${
-        userIdNo.toString().length == 1 ? "0" + userIdNo : userIdNo
-      }`,
-      ...userDetails
+      ...userDetails,pfpPath
     });
-
-    if (newUser){res.status(200).json({ message: "Successfully signed up" })}else{ invalid();
-      throw new Error("Could not sign up");};
+ 
+    if (newUser){res.status(200).json({ message: "Successfully signed up", userId: newUser.insertedId})}
+       else { 
+      throw new Error("Could not sign up");
+    };
 
   } catch (error) {
     console.error("Error signining designer up: ", error);
-    res.status(status).json({ message: message });
+    res.status(status).json({ "error": message });
   }
 });
+
+app.post("/userLogin", async (req, res) => {
+  let status = 500;
+  let message = "Internal server error";
+  try {
+    const userDetails = req.body;
+    const col = userDetails.isDesigner? db.collection("designers") : db.collection("customers");
+    console.log(userDetails)
+
+    const invalid = (m = "invalid input") => {
+      status = 401;
+      message = m;
+    };
+
+    if (!userDetails.email || !userDetails.password) {
+      invalid("enter email and password");
+      throw new Error("enter email and password");
+    }
+ 
+    const user = await col.findOne(
+      { email: userDetails.email },
+      {}
+    );
+
+    if (!user) {
+      invalid("Email does not exist please sign up");
+      throw new Error("Email does not exist");
+    }
+
+    const decodedPassword = base64.decode(user.password);
+    if (decodedPassword !== userDetails.password) {
+      invalid("incorrect password");
+      throw new Error("incorrect password");
+    }
+
+    res.status(200).json({ message: "successfully logged in",userId: user["_id"]});
+  } catch (error) {
+    console.error("Error logging user in: ", error);
+    res.status(status).json({ error: message });
+  }
+});
+
+
 // app.use(basicAuth);
 
 
-app.get("/userLogin", async (req, res) => {
-  try {
-    res.status(200).json({ message: "successfully logged in",user: req.user["designerId" || "customerId"] });
-  } catch (error) {
-    console.error("Error logging user in: ", error);
-    res.status(500).json("Internal Server Error");
-  }
-});
 
 
 //getting all stock products so it can be displayed on the product pages
