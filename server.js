@@ -219,7 +219,7 @@ app.get("/membersProfiles", async (req, res) => {
       .find(
         { profileStatus: true },
         { projection: { relationshipIntent: 1, likes: 1, shortDescription: 1 } }
-      )
+      ) 
       .toArray();
     const membersInfo = await membersInfoCol
       .find(
