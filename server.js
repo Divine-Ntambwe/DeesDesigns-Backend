@@ -362,7 +362,7 @@ app.put("/dislikeProfile/:likerUsername/:memberUsername", async (req, res) => {
   }
 });
 //updating profile data when user wants to edit thier profile
-app.put("/UpdatemembersPersonalInfo/:username", async (req, res) => {
+app.put("/UpdatemembersPersonalInfo/:username",upload.single("pfp"), async (req, res) => {
   let status = 500;
   let message = "Internal server error";
   const invalid = () => {
@@ -370,8 +370,9 @@ app.put("/UpdatemembersPersonalInfo/:username", async (req, res) => {
     message = "Invalid input";
   };
   try {
-    const updates = req.body;
+    const updates = JSON.parse(req.body.updates);
     const username = req.params.username;
+    console.log(updates)
 
     if (updates.username) {
       const newUsername = updates.username;
@@ -385,16 +386,16 @@ app.put("/UpdatemembersPersonalInfo/:username", async (req, res) => {
 
     const result = await db
       .collection("membersProfile")
-      .updateOne({ username }, { updates });
+      .updateOne({ username }, {$set: updates} );
 
     if (result.modifiedCount === 1) {
-      res.status(200).send("successfully updated");
+      res.status(200).json({message:"successfully updated"});
     } else {
       throw new Error("Could not update profile");
     }
   } catch (error) {
     console.error("Error updating profile", error);
-    res.status(500).send({ message: "Internal server error" });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -412,8 +413,8 @@ app.get("/connectionRequests/:username", async (req, res) => {
       .toArray();
 
     if (result.length) {
-      res.status(200).json(result);
-    } else {
+      res.status(200).json(result); 
+    } else { 
       throw new Error("Error getting connection requests");
     }
   } catch (error) {
