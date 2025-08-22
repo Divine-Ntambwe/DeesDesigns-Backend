@@ -22,7 +22,7 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage });
-app.use("uploads", express.static("uploads"));
+app.use("/uploads", express.static("uploads"));
 
 const port = process.env.port || 5000;
 
@@ -154,7 +154,7 @@ app.post("/designersSignUp", upload.single("pfp"), async (req, res) => {
 
     const designersCol = db.collection("designers");
 
-    console.log(userDetails);
+
     for (let i in userDetails) {
       if (userDetails[i].length === 0) {
         invalid("Please fill in all fields");
@@ -518,6 +518,13 @@ app.post("/orders/:customerId", async (req, res) => {
       .collection("customersAddress")
       .updateOne({customerId},{ $set:{...orderDetails.address} });
 
+    if (!address.matchedCount){
+      await db
+      .collection("customersAddress")
+      .insertOne({customerId,...orderDetails.address} );
+
+    }  
+
     if (orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, "").length !== 16 || /\D/.test(orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, ""))) {
       invalid("invalid card number");
       throw new Error("invalid card number");  
@@ -548,9 +555,16 @@ app.post("/orders/:customerId", async (req, res) => {
       throw new Error("Credit card is already expired");
     }
   
-    await db
+    const bankDetails = await db
       .collection("usersBankDetails")
       .updateOne({ userId: customerId},{$set:{ ...orderDetails.bankDetails}});  
+    
+     if (!bankDetails.matchedCount){
+      await db
+      .collection("usersBankDetails")
+      .insertOne({userId:customerId,...orderDetails.bankDetails} );
+
+    }    
 
      
 
@@ -559,7 +573,6 @@ app.post("/orders/:customerId", async (req, res) => {
     for (i of productDetails) {
       let product = {};
       product.productId = i.productId;
-      console.log(i.productProvider)
       product = i.productProvider === "stock"
         ? await db
             .collection("stockProducts")
@@ -587,8 +600,6 @@ app.post("/orders/:customerId", async (req, res) => {
         invalid("product "+i.productName+ " is no longer available in the quantity you want");
         throw new Error("product is no longer available in the quantity you want");
       }
-
-      console.log(product.itemsInStock)
        
 
       if (i.productProvider === "stock") {
@@ -609,7 +620,7 @@ app.post("/orders/:customerId", async (req, res) => {
 
        
     }
-    const dateOfDelivery = new Date(new Date().setDate(new Date().getDate() + (Math.floor(Math.random()*3)+5)))
+    const dateOfDelivery = new Date(new Date().setDate(new Date().getDate() + (Math.floor(Math.random()*3)+4)))
     const orderResult = await db.collection("orders").insertOne({
       ...orderDetails,
       dateOfPurchase: new Date(),
@@ -647,22 +658,21 @@ app.get("/customerOrders/:customerId", async (req, res) => {
     for (let order of ordersDetails){
       
     const daysInProcess = new Date(order.dateOfDelivery - order.dateOfPurchase).getDate() - 2;
-    console.log(daysInProcess)
-    
+     
      if (Date.parse(new Date()) <= Date.parse(`1970/01/${daysInProcess}`) + Date.parse(order.dateOfPurchase) 
     && new Date().toDateString() !== order.dateOfPurchase.toDateString()){
       await db.collection("orders").updateOne({_id:order._id},{$set:{statusOfExchange:"is being processed"}})
     } 
       
-    if (new Date(Date.parse(new Date()) === new Date(Date.parse(`1970/01/${daysInProcess + 1}`) + Date.parse(order.dateOfPurchase)).toDateString())){
+    if (new Date().toDateString() === new Date(Date.parse(`1970/01/${daysInProcess + 1}`) + Date.parse(order.dateOfPurchase)).toDateString()){
       await db.collection("orders").updateOne({_id:order._id},{$set:{statusOfExchange:"in transit"}})
     }  
 
-    if ((new Date(Date.parse(new Date())).toDateString() === new Date(Date.parse(`1970/01/${daysInProcess + 2}`) + Date.parse(order.dateOfPurchase)).toDateString())){
-      await db.collection("orders").updateOne({_id:order._id},{$set:{statusOfExchange:"has hit the road"}})
+    if (new Date().toDateString() === new Date(Date.parse(`1970/01/${daysInProcess + 2}`) + Date.parse(order.dateOfPurchase)).toDateString()){
+      await db.collection("orders").updateOne({_id:order._id},{$set:{statusOfExchange:"has hit the road!"}})
     }    
     
-    if ((new Date(Date.parse(new Date())).toDateString() === new Date(Date.parse(`1970/01/${daysInProcess + 1}`) + Date.parse(order.dateOfPurchase)).toDateString())){
+    if (new Date().toDateString() === new Date(Date.parse(`1970/01/${daysInProcess + 3}`) + Date.parse(order.dateOfPurchase)).toDateString()){
       await db.collection("orders").updateOne({_id:order._id},{$set:{statusOfExchange:"delivered"}})
     }  
     } 
@@ -670,7 +680,7 @@ app.get("/customerOrders/:customerId", async (req, res) => {
 
     const result = await db
       .collection("orders")
-      .find({ customerId }).toArray();
+      .find({ customerId }).toArray();      
       
     res.status(200).json(result);
   } catch (error) {
@@ -680,54 +690,32 @@ app.get("/customerOrders/:customerId", async (req, res) => {
 });
 
 //posting a review a user leaves
-app.post("/uploadReview/:customerId/:productId", async (req, res) => {
+app.post("/uploadReview/:customerId", async (req, res) => {
   let status = 500;
   let message = "Internal server error";
   try {
-    const invalid = () => {
+    const invalid = (m = message) => {
       status = 401;
-      message = "invalid operation";
+      message = m;
     };
-    const review = req.body; //review,rating
+    
     const custId = req.params.customerId;
-    const prodId = req.params.productId;
-    const productDetails = await db
-      .collection("orders")
-      .findOne({ customerId: custId });
-    if (!productDetails) {
-      invalid();
-      throw new Error(
-        "You can not write a review as you have not received this product"
-      );
-    }
+    const {productId,name,surname,review,rating} = req.body;
 
-    let found = false;
-    for (let i of productDetails.purchasedProducts) {
-      if (i.productId == prodId) {
-        found = true;
-      }
-    }
-
-    if (!found) {
-      invalid();
-      throw new Error(
-        "You can not write a review as you have not received this product"
-      );
-    }
-
-    const user = await db
-      .collection("customers")
-      .findOne({ customerId: custId });
-    const name = user.name;
-    const surname = user.surname;
-    const result = await db.collection("reviews").insertOne({
-      name: name,
-      surname: surname,
-      productId: prodId,
+    if (review){
+      await db.collection("reviews").insertOne({
+      name,
+      surname,
+      productId,
       dateOfUpload: new Date(),
-      ...review,
+      review,
+      rating
     });
-    res.status(200).json({ message: "successfully uploaded" });
+    }
+
+   await db.collection("stockProducts").updateOne({_id:new mongodb.ObjectId(productId)},{$push: {rating:rating}})
+    res.status(200).json({ message: "successfully uploaded" })
+      
   } catch (error) {
     console.error("error creating review", error);
     res.status(status).json({ message: message });
@@ -750,20 +738,20 @@ app.get("/designersProducts/:designerId", async (req, res) => {
 });
 
 //creating a new designer product
-app.post("/uploadDesignersProduct/:designerId", async (req, res) => {
+app.post("/uploadDesignersProduct/:designerId", upload.single("productImage"), async (req, res) => {
   try {
-    const newItem = req.body; //
+    const newItem = JSON.parse(req.body.details);
     const desId = req.params.designerId;
-    const designersCol = db.collection("designers");
-    let desIdNo = await designersCol.find({}).toArray();
-    desIdNo = desIdNo.length + 1;
+    
+
+
+    const designersCol = db.collection("designersProducts");
+    const productImgPath = req.file.path;
 
     const result = {
-      designerProductId: `DP${
-        desIdNo.toString().length == 1 ? "0" + desIdNo : desIdNo
-      }`,
       designerId: desId,
       ...newItem,
+      imagePath: productImgPath,
       onSale: true,
     };
 
@@ -771,7 +759,7 @@ app.post("/uploadDesignersProduct/:designerId", async (req, res) => {
     res.status(200).json(result);
   } catch (error) {
     console.error("Error creating new design: ", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -790,12 +778,17 @@ app.delete("/removeDesignersProducts/:designerProductId", async (req, res) => {
 });
 
 //updating details for a specific designer products
-app.put("/editDesignerProductDetails/:designerProductId", async (req, res) => {
+app.put("/editDesignerProductDetails/:designerProductId",upload.single("productImage"), async (req, res) => {
   try {
-    const updates = req.body;
     const desProdId = req.params.designerProductId;
+    const updates = JSON.parse(req.body.details);
+    
+
+
+    const designersCol = db.collection("designersProducts");
+    const productImgPath = req.file.path;
     await db
-      .collection("designersProducts")
+      .collection("designersProducts") 
       .updateOne({ designerProductId: desProdId }, { $set: { ...updates } });
     res.status(200).json({ message: "successfully updated" });
   } catch (error) {
