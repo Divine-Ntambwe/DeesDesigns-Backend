@@ -8,6 +8,7 @@ const cors = require("cors");
 const multer = require("multer");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
+const { match } = require("assert");
 app.use(express.json());
 app.use(cors());
 
@@ -752,11 +753,11 @@ app.post("/uploadDesignersProduct/:designerId", upload.single("productImage"), a
       designerId: desId,
       ...newItem,
       imagePath: productImgPath,
-      onSale: true,
-    };
+      onSale: true, 
+    };   
 
     await designersCol.insertOne(result);
-    res.status(200).json(result);
+    res.status(200).json({message: "successfully uploaded"});
   } catch (error) {
     console.error("Error creating new design: ", error);
     res.status(500).json({ error: "Internal server error" });
@@ -769,11 +770,11 @@ app.delete("/removeDesignersProducts/:designerProductId", async (req, res) => {
     const desProdId = req.params.designerProductId;
     await db
       .collection("designersProducts")
-      .updateOne({ designerProductId: desProdId }, { $set: { onSale: false } });
+      .deleteOne({ _id: new mongodb.ObjectId(desProdId)  });
     res.status(200).json({ message: "successfully deleted" });
   } catch (error) {
     console.error("error deleting a designer's product", error);
-    res.status(500).json({ message: "internal server error" });
+    res.status(500).json({ error: "internal server error" });
   }
 });
 
@@ -782,28 +783,33 @@ app.put("/editDesignerProductDetails/:designerProductId",upload.single("productI
   try {
     const desProdId = req.params.designerProductId;
     const updates = JSON.parse(req.body.details);
-    
-
-
-    const designersCol = db.collection("designersProducts");
-    const productImgPath = req.file.path;
-    await db
+     
+    if (req.file){
+      updates.imagePath = req.file.path;
+    }
+   console.log(desProdId)
+    const result = await db
       .collection("designersProducts") 
-      .updateOne({ designerProductId: desProdId }, { $set: { ...updates } });
-    res.status(200).json({ message: "successfully updated" });
-  } catch (error) {
-    console.error("error getting designer's products", error);
-    res.status(500).json({ message: "internal server error" });
-  }
-});
+      .updateOne({ _id: new mongodb.ObjectId(desProdId) }, { $set: { ...updates} });
 
-app.get("/designerContactInfo/:designerId", async (req, res) => {
+      if (result.matchedCount){
+        res.status(200).json({ message: "successfully updated" });
+      } else {
+        throw new Error("could not update product")
+      }
+    
+  } catch (error) {
+    console.error("error updating product", error);
+    res.status(500).json({ error: "internal server error" });
+  }
+}); 
+
+app.get("/designersContactInfo", async (req, res) => {
   try {
-    const desId = req.params.designerId;
     const result = await db
       .collection("designers")
-      .findOne(
-        { designerId: desId },
+      .find(
+        {},
         {
           projection: {
             name: 1,
@@ -811,9 +817,11 @@ app.get("/designerContactInfo/:designerId", async (req, res) => {
             phoneNumber: 1,
             email: 1,
             gender: 1,
-          },
+            pfpPath:1
+          },   
         }
-      );
+      ).toArray();
+
     res.status(200).json(result);
   } catch (error) {
     console.error("error getting designer's products", error);
