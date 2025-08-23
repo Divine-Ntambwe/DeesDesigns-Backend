@@ -9,6 +9,8 @@ const multer = require("multer");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 const { match } = require("assert");
+const nodemailer = require("nodemailer");
+const crypto = require("crypto");
 app.use(express.json());
 app.use(cors());
 
@@ -24,6 +26,14 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 app.use("/uploads", express.static("uploads"));
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: "deesdesigns465@gmail.com",
+    pass: "gxat mwpm yrqq cinm",
+  },
+});
 
 const port = process.env.port || 5000;
 
@@ -132,9 +142,7 @@ app.post("/customersSignUp", async (req, res) => {
       ...userDetails,
     });
 
-    res
-      .status(200)
-      .json({ message: "Successfully signed up", newUser});
+    res.status(200).json({ message: "Successfully signed up", newUser });
   } catch (error) {
     console.error("Error signining customer up: ", error);
     res.status(status).json({ error: message });
@@ -154,7 +162,6 @@ app.post("/designersSignUp", upload.single("pfp"), async (req, res) => {
     let userDetails = JSON.parse(req.body.details);
 
     const designersCol = db.collection("designers");
-
 
     for (let i in userDetails) {
       if (userDetails[i].length === 0) {
@@ -212,12 +219,10 @@ app.post("/designersSignUp", upload.single("pfp"), async (req, res) => {
     });
 
     if (newUser) {
-      res
-        .status(200)
-        .json({
-          message: "Successfully signed up",
-          ...newUser
-        });
+      res.status(200).json({
+        message: "Successfully signed up",
+        ...newUser,
+      });
     } else {
       throw new Error("Could not sign up");
     }
@@ -408,14 +413,15 @@ app.get("/cart/:customerId", async (req, res) => {
 app.delete("/removeCheckedOutItems/:customerId", async (req, res) => {
   try {
     const custId = req.params.customerId;
-    const result = await db.collection("cart").deleteMany({ customerId: custId });
+    const result = await db
+      .collection("cart")
+      .deleteMany({ customerId: custId });
 
-    if (result.deletedCount){
+    if (result.deletedCount) {
       res.status(200).json({ message: "successfully deleted items" });
     } else {
-      throw new Error("couldn't delete")
+      throw new Error("couldn't delete");
     }
-    
   } catch (error) {
     console.error("Error removing all cart items:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -508,100 +514,105 @@ app.post("/orders/:customerId", async (req, res) => {
   let status = 500;
   let message = "Internal server error";
   try {
-     const invalid = (m = "invalid input") => {
+    const invalid = (m = "invalid input") => {
       status = 401;
       message = m;
     };
     const orderDetails = req.body; //paymentMethod: ,purchasedProducts:[{productId,quantity,size}]
     const customerId = req.params.customerId;
-    
+
     const address = await db
       .collection("customersAddress")
-      .updateOne({customerId},{ $set:{...orderDetails.address} });
+      .updateOne({ customerId }, { $set: { ...orderDetails.address } });
 
-    if (!address.matchedCount){
+    if (!address.matchedCount) {
       await db
-      .collection("customersAddress")
-      .insertOne({customerId,...orderDetails.address} );
+        .collection("customersAddress")
+        .insertOne({ customerId, ...orderDetails.address });
+    }
 
-    }  
-
-    if (orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, "").length !== 16 || /\D/.test(orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, ""))) {
+    if (
+      orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, "").length !== 16 ||
+      /\D/.test(orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, ""))
+    ) {
       invalid("invalid card number");
-      throw new Error("invalid card number");  
+      throw new Error("invalid card number");
     }
 
     if (
       (await db
         .collection("userBankDetails")
-        .findOne({ cardNumber: orderDetails.bankDetails.cardNumber })) !== 
-        await db
-        .collection("userBankDetails")
-        .findOne({customerId})
-
+        .findOne({ cardNumber: orderDetails.bankDetails.cardNumber })) !==
+      (await db.collection("userBankDetails").findOne({ customerId }))
     ) {
       invalid("bank details already exists");
       throw new Error("bank details already exists");
     }
 
-
-    if (orderDetails.bankDetails.cvv.length !== 4 || /\D/.test(orderDetails.bankDetails.cvv)) {
+    if (
+      orderDetails.bankDetails.cvv.length !== 4 ||
+      /\D/.test(orderDetails.bankDetails.cvv)
+    ) {
       invalid("Invalid CVV number");
       throw new Error("Invalid CVV number");
     }
     const expDate = new Date(orderDetails.bankDetails.expiryDate);
-  
+
     if (expDate < new Date()) {
       invalid("Credit card is already expired");
       throw new Error("Credit card is already expired");
     }
-  
+
     const bankDetails = await db
       .collection("usersBankDetails")
-      .updateOne({ userId: customerId},{$set:{ ...orderDetails.bankDetails}});  
-    
-     if (!bankDetails.matchedCount){
+      .updateOne(
+        { userId: customerId },
+        { $set: { ...orderDetails.bankDetails } }
+      );
+
+    if (!bankDetails.matchedCount) {
       await db
-      .collection("usersBankDetails")
-      .insertOne({userId:customerId,...orderDetails.bankDetails} );
-
-    }    
-
-     
+        .collection("usersBankDetails")
+        .insertOne({ userId: customerId, ...orderDetails.bankDetails });
+    }
 
     const productDetails = orderDetails.purchasedProducts;
 
     for (i of productDetails) {
       let product = {};
       product.productId = i.productId;
-      product = i.productProvider === "stock"
-        ? await db
-            .collection("stockProducts")
-            .findOne(
-              { _id: new mongodb.ObjectId(i.productId) },
-              { projection: { name: 1, price: 1, itemsInStock: 1, _id: 0 } }
-            )
-        : await db
-            .collection("designersProducts")
-            .findOne(
-              { _id: new mongodb.ObjectId(i.productId) },
-              { projection: { name: 1, price: 1, itemsInStock: 1, _id: 0 } }
-            );
+      product =
+        i.productProvider === "stockProduct"
+          ? await db
+              .collection("stockProducts")
+              .findOne(
+                { _id: new mongodb.ObjectId(i.productId) },
+                { projection: { name: 1, price: 1, itemsInStock: 1, _id: 0 } }
+              )
+          :i.productProvider === "designerProduct"? await db
+              .collection("designersProducts")
+              .findOne(
+                { _id: new mongodb.ObjectId(i.productId) },
+                { projection: { name: 1, price: 1, itemsInStock: 1, _id: 0 } }
+              ):{}
+      if (i.productProvider === "designer") break;
+      if (!product) {
+        invalid("product " + i.productName + " does not exist anymore");
+        throw new Error("product does not exist anymore");
+      }
 
-      if (!product){
-        console.log(i.productId)
-        invalid("product " +i.productName +" does not exist anymore")
-        throw new Error("product does not exist anymore")
-      }      
-  
       product.itemsInStock[i.size] = product.itemsInStock[i.size] - i.quantity;
-      
 
       if (product.itemsInStock[i.size] < 0) {
-        invalid("product "+i.productName+ " is no longer available in the quantity you want");
-        throw new Error("product is no longer available in the quantity you want");
+        invalid(
+          "product " +
+            i.productName +
+            " is no longer available in the quantity you want"
+        );
+        throw new Error(
+          "product is no longer available in the quantity you want"
+        );
       }
-       
 
       if (i.productProvider === "stock") {
         await db
@@ -618,10 +629,12 @@ app.post("/orders/:customerId", async (req, res) => {
             { $set: { onSale: false } }
           );
       }
-
-       
     }
-    const dateOfDelivery = new Date(new Date().setDate(new Date().getDate() + (Math.floor(Math.random()*3)+4)))
+    const dateOfDelivery = new Date(
+      new Date().setDate(
+        new Date().getDate() + (Math.floor(Math.random() * 3) + 4)
+      )
+    );
     const orderResult = await db.collection("orders").insertOne({
       ...orderDetails,
       dateOfPurchase: new Date(),
@@ -629,14 +642,13 @@ app.post("/orders/:customerId", async (req, res) => {
       statusOfExchange: "confirmed",
     });
 
-    const deletedResult = await db.collection("cart").deleteMany({ customerId });
+    const deletedResult = await db
+      .collection("cart")
+      .deleteMany({ customerId });
 
-    if (!deletedResult.deletedCount){
-      throw new Error("couldn't delete")
-    } 
-
-    
-       
+    if (!deletedResult.deletedCount) {
+      throw new Error("couldn't delete");
+    }
 
     res.status(200).json(orderResult);
   } catch (error) {
@@ -652,37 +664,75 @@ app.get("/customerOrders/:customerId", async (req, res) => {
 
     const ordersDetails = await db
       .collection("orders")
-      .find({ customerId }).toArray();
-    
+      .find({ customerId })
+      .toArray();
 
-    
-    for (let order of ordersDetails){
-      
-    const daysInProcess = new Date(order.dateOfDelivery - order.dateOfPurchase).getDate() - 2;
-     
-     if (Date.parse(new Date()) <= Date.parse(`1970/01/${daysInProcess}`) + Date.parse(order.dateOfPurchase) 
-    && new Date().toDateString() !== order.dateOfPurchase.toDateString()){
-      await db.collection("orders").updateOne({_id:order._id},{$set:{statusOfExchange:"is being processed"}})
-    } 
-      
-    if (new Date().toDateString() === new Date(Date.parse(`1970/01/${daysInProcess + 1}`) + Date.parse(order.dateOfPurchase)).toDateString()){
-      await db.collection("orders").updateOne({_id:order._id},{$set:{statusOfExchange:"in transit"}})
-    }  
+    for (let order of ordersDetails) {
+      const daysInProcess =
+        new Date(order.dateOfDelivery - order.dateOfPurchase).getDate() - 2;
 
-    if (new Date().toDateString() === new Date(Date.parse(`1970/01/${daysInProcess + 2}`) + Date.parse(order.dateOfPurchase)).toDateString()){
-      await db.collection("orders").updateOne({_id:order._id},{$set:{statusOfExchange:"has hit the road!"}})
-    }    
-    
-    if (new Date().toDateString() === new Date(Date.parse(`1970/01/${daysInProcess + 3}`) + Date.parse(order.dateOfPurchase)).toDateString()){
-      await db.collection("orders").updateOne({_id:order._id},{$set:{statusOfExchange:"delivered"}})
-    }  
-    } 
- 
+      if (
+        Date.parse(new Date()) <=
+          Date.parse(`1970/01/${daysInProcess}`) +
+            Date.parse(order.dateOfPurchase) &&
+        new Date().toDateString() !== order.dateOfPurchase.toDateString()
+      ) {
+        await db
+          .collection("orders")
+          .updateOne(
+            { _id: order._id },
+            { $set: { statusOfExchange: "is being processed" } }
+          );
+      }
 
-    const result = await db
-      .collection("orders")
-      .find({ customerId }).toArray();      
-      
+      if (
+        new Date().toDateString() ===
+        new Date(
+          Date.parse(`1970/01/${daysInProcess + 1}`) +
+            Date.parse(order.dateOfPurchase)
+        ).toDateString()
+      ) {
+        await db
+          .collection("orders")
+          .updateOne(
+            { _id: order._id },
+            { $set: { statusOfExchange: "in transit" } }
+          );
+      }
+
+      if (
+        new Date().toDateString() ===
+        new Date(
+          Date.parse(`1970/01/${daysInProcess + 2}`) +
+            Date.parse(order.dateOfPurchase)
+        ).toDateString()
+      ) {
+        await db
+          .collection("orders")
+          .updateOne(
+            { _id: order._id },
+            { $set: { statusOfExchange: "has hit the road!" } }
+          );
+      }
+
+      if (
+        new Date().toDateString() ===
+        new Date(
+          Date.parse(`1970/01/${daysInProcess + 3}`) +
+            Date.parse(order.dateOfPurchase)
+        ).toDateString()
+      ) {
+        await db
+          .collection("orders")
+          .updateOne(
+            { _id: order._id },
+            { $set: { statusOfExchange: "delivered" } }
+          );
+      }
+    }
+
+    const result = await db.collection("orders").find({ customerId }).toArray();
+
     res.status(200).json(result);
   } catch (error) {
     console.error("error getting product", error);
@@ -699,24 +749,28 @@ app.post("/uploadReview/:customerId", async (req, res) => {
       status = 401;
       message = m;
     };
-    
-    const custId = req.params.customerId;
-    const {productId,name,surname,review,rating} = req.body;
 
-    if (review){
+    const custId = req.params.customerId;
+    const { productId, name, surname, review, rating } = req.body;
+
+    if (review) {
       await db.collection("reviews").insertOne({
-      name,
-      surname,
-      productId,
-      dateOfUpload: new Date(),
-      review,
-      rating
-    });
+        name,
+        surname,
+        productId,
+        dateOfUpload: new Date(),
+        review,
+        rating,
+      });
     }
 
-   await db.collection("stockProducts").updateOne({_id:new mongodb.ObjectId(productId)},{$push: {rating:rating}})
-    res.status(200).json({ message: "successfully uploaded" })
-      
+    await db
+      .collection("stockProducts")
+      .updateOne(
+        { _id: new mongodb.ObjectId(productId) },
+        { $push: { rating: rating } }
+      );
+    res.status(200).json({ message: "successfully uploaded" });
   } catch (error) {
     console.error("error creating review", error);
     res.status(status).json({ message: message });
@@ -739,30 +793,32 @@ app.get("/designersProducts/:designerId", async (req, res) => {
 });
 
 //creating a new designer product
-app.post("/uploadDesignersProduct/:designerId", upload.single("productImage"), async (req, res) => {
-  try {
-    const newItem = JSON.parse(req.body.details);
-    const desId = req.params.designerId;
-    
+app.post(
+  "/uploadDesignersProduct/:designerId",
+  upload.single("productImage"),
+  async (req, res) => {
+    try {
+      const newItem = JSON.parse(req.body.details);
+      const desId = req.params.designerId;
 
+      const designersCol = db.collection("designersProducts");
+      const productImgPath = req.file.path;
 
-    const designersCol = db.collection("designersProducts");
-    const productImgPath = req.file.path;
+      const result = {
+        designerId: desId,
+        ...newItem,
+        imagePath: productImgPath,
+        onSale: true,
+      };
 
-    const result = {
-      designerId: desId,
-      ...newItem,
-      imagePath: productImgPath,
-      onSale: true, 
-    };   
-
-    await designersCol.insertOne(result);
-    res.status(200).json({message: "successfully uploaded"});
-  } catch (error) {
-    console.error("Error creating new design: ", error);
-    res.status(500).json({ error: "Internal server error" });
+      await designersCol.insertOne(result);
+      res.status(200).json({ message: "successfully uploaded" });
+    } catch (error) {
+      console.error("Error creating new design: ", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
   }
-});
+);
 
 //removing a designer product when a designer wants to remove it
 app.delete("/removeDesignersProducts/:designerProductId", async (req, res) => {
@@ -770,7 +826,7 @@ app.delete("/removeDesignersProducts/:designerProductId", async (req, res) => {
     const desProdId = req.params.designerProductId;
     await db
       .collection("designersProducts")
-      .deleteOne({ _id: new mongodb.ObjectId(desProdId)  });
+      .deleteOne({ _id: new mongodb.ObjectId(desProdId) });
     res.status(200).json({ message: "successfully deleted" });
   } catch (error) {
     console.error("error deleting a designer's product", error);
@@ -779,30 +835,36 @@ app.delete("/removeDesignersProducts/:designerProductId", async (req, res) => {
 });
 
 //updating details for a specific designer products
-app.put("/editDesignerProductDetails/:designerProductId",upload.single("productImage"), async (req, res) => {
-  try {
-    const desProdId = req.params.designerProductId;
-    const updates = JSON.parse(req.body.details);
-     
-    if (req.file){
-      updates.imagePath = req.file.path;
-    }
-   console.log(desProdId)
-    const result = await db
-      .collection("designersProducts") 
-      .updateOne({ _id: new mongodb.ObjectId(desProdId) }, { $set: { ...updates} });
+app.put(
+  "/editDesignerProductDetails/:designerProductId",
+  upload.single("productImage"),
+  async (req, res) => {
+    try {
+      const desProdId = req.params.designerProductId;
+      const updates = JSON.parse(req.body.details);
 
-      if (result.matchedCount){
+      if (req.file) {
+        updates.imagePath = req.file.path;
+      }
+      console.log(desProdId);
+      const result = await db
+        .collection("designersProducts")
+        .updateOne(
+          { _id: new mongodb.ObjectId(desProdId) },
+          { $set: { ...updates } }
+        );
+
+      if (result.matchedCount) {
         res.status(200).json({ message: "successfully updated" });
       } else {
-        throw new Error("could not update product")
+        throw new Error("could not update product");
       }
-    
-  } catch (error) {
-    console.error("error updating product", error);
-    res.status(500).json({ error: "internal server error" });
+    } catch (error) {
+      console.error("error updating product", error);
+      res.status(500).json({ error: "internal server error" });
+    }
   }
-}); 
+);
 
 app.get("/designersContactInfo", async (req, res) => {
   try {
@@ -817,16 +879,126 @@ app.get("/designersContactInfo", async (req, res) => {
             phoneNumber: 1,
             email: 1,
             gender: 1,
-            pfpPath:1
-          },   
+            pfpPath: 1,
+          },
         }
-      ).toArray();
+      )
+      .toArray();
 
     res.status(200).json(result);
   } catch (error) {
     console.error("error getting designer's products", error);
     res.status(500).json({ message: "internal server error" });
   }
+});
+
+app.post("/SendDesignToCustomer/:designerId",  upload.single("custProductImage"),async (req, res) => {
+  let status = 500;
+  let message = "Internal server error";
+
+  try {
+    const invalid = (m = "invalid input") => {
+      status = 401;
+      message = m;
+    };
+    const designerId = req.params.designerId;
+
+    const {
+      customerEmail,
+      name,
+      uploadedBy
+    } = JSON.parse(req.body.details);
+
+    const customer = await db
+      .collection("customers")
+      .findOne({ email: customerEmail });
+
+    if (!customer) {
+      invalid("Customer not found");
+      throw new Error("customer not found");
+    }
+
+    const token = crypto.randomBytes(20).toString("hex");
+    const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+    const link = `http://localhost:5000/confirmCartRequest?token=${token}`; 
+
+    await transporter.sendMail({
+      from: "becalisjohnson@gmail.com",
+      to: customerEmail,
+      subject: "Confirm Designer Product Request",
+      html: `<p>The Designer ${uploadedBy} has sent a request for you to add the product ${name} to your cart click here to confirm:</p> <br/> <a href="${link}">Click here to confirm</a>`,
+    });
+
+     const cartRequest = await db
+      .collection("customerCartRequests")
+      .insertOne({
+        customerId: customer._id.toString(),
+        ...JSON.parse(req.body.details),
+        imagePath:req.file.path,
+        size: "M",
+        quantity: 1,
+        expiresAt,
+        token
+      });
+      
+      res.status(200).send({message:"succcessfully sent"})
+  } catch (error) {
+    console.error("Error sending email: ", error);
+    res.status(status).json({ error: message });
+  }
+});
+
+app.get("/confirmCartRequest", async (req, res) => {
+  let status = 500;
+  let message = "Internal server error";
+ try{
+   const invalid = (m = "invalid input") => {
+      status = 401;
+      message = m;
+    };
+  const { token } = req.query;
+  const request = await db.collection("customerCartRequests").findOne({ token });
+
+  if (!request) {
+   invalid("Invalid Token")
+   throw new Error("Invalid Token")
+   
+  }
+
+  if (Date.now() > request.expiresAt){
+    invalid("Token expired")
+    throw new Error("Token expired");
+    }
+    console.log(request)
+
+   const {customerId,
+      productId,
+      name,
+      price,
+      imagePath,
+      productProvider,
+      size,
+      quantity} = request;
+
+    const cartCol = db.collection("cart");
+    const result = await cartCol.insertOne({customerId,
+      productName:name,
+      price,
+      imgPath:imagePath,
+      productProvider,
+      size,
+      quantity});
+
+      if (result){
+        res.status(200).json({message:"successfully confirmed"})
+      } else {
+        throw new Error("couldn't confirm email")
+      }
+
+ }catch(error){
+   console.error("Error confirming email: ", error);
+   res.status(status).json({ error: message });
+ }
 });
 
 app.listen(port, async () => {
