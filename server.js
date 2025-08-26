@@ -141,8 +141,7 @@ app.post("/customersSignUp", async (req, res) => {
     const newUser = await customersCol.insertOne({
       ...userDetails,
     });
-
-    res.status(200).json({ message: "Successfully signed up", newUser });
+    res.status(200).json({ message: "Successfully signed up", _id:newUser.insertedId,...userDetails });
   } catch (error) {
     console.error("Error signining customer up: ", error);
     res.status(status).json({ error: message });
@@ -217,11 +216,12 @@ app.post("/designersSignUp", upload.single("pfp"), async (req, res) => {
       ...userDetails,
       pfpPath,
     });
-
     if (newUser) {
       res.status(200).json({
         message: "Successfully signed up",
-        ...newUser,
+        _id:newUser.insertedId,
+        ...userDetails,
+        pfpPath   
       });
     } else {
       throw new Error("Could not sign up");
@@ -960,19 +960,34 @@ app.get("/confirmCartRequest", async (req, res) => {
   const request = await db.collection("customerCartRequests").findOne({ token });
 
   if (!request) {
+   res.send(`
+      <div style="color:#d07a7a;
+                  height:90vh;display:flex;flex-direction:column;
+                  align-items:center;justify-content:center;font-family:Arial">
+        <h1 style="font-size:2.5rem;">❌ Invalid or Expired Link</h1>
+        <p style="margin-top:10px;">Please request a new confirmation email.</p>
+      </div>
+    `) 
    invalid("Invalid Token")
    throw new Error("Invalid Token")
    
   }
 
   if (Date.now() > request.expiresAt){
+    res.send(`
+      <div style="color:#d07a7a;
+                  height:90vh;display:flex;flex-direction:column;
+                  align-items:center;justify-content:center;font-family:Arial">
+        <h1 style="font-size:2.5rem;">⌛ Link Expired</h1>
+        <p  style="margin-top:10px;">Please request a new confirmation email.</p>
+      </div>
+    `)
     invalid("Token expired")
     throw new Error("Token expired");
     }
-    console.log(request)
+  
 
    const {customerId,
-      productId,
       name,
       price,
       imagePath,
@@ -990,7 +1005,18 @@ app.get("/confirmCartRequest", async (req, res) => {
       quantity});
 
       if (result){
-        res.status(200).json({message:"successfully confirmed"})
+        await db.collection("customerCartRequests").deleteOne({ token });
+        res.status(200)
+        res.send(`
+    <div style="color:#d07a7a;
+                height:100vh;display:flex;flex-direction:column;
+                align-items:center;justify-content:center;font-family:raleway">
+      <h1 style="font-size:4.5rem;">Email Confirmed!</h1>
+     
+       <p style="margin-top:10px;font-size:4.5rem;">You can now view product in your cart <a href="http://localhost:5173/Home">Home</a>.</p>
+       
+    </div>
+  `)
       } else {
         throw new Error("couldn't confirm email")
       }
