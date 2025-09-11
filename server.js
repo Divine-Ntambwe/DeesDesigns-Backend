@@ -65,7 +65,7 @@ async function basicAuth(req, res, next) {
 
   //spliiting the credentials into user and password
   const base64Credentials = authHeader.split(" ")[1];
-  console.log(base64Credentials)
+  res.send(base64Credentials)
   const credentials = base64.decode(base64Credentials).split(":");
   const email = credentials[0];
   const password = credentials[1];
