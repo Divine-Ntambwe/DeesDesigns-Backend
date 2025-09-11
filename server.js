@@ -50,8 +50,8 @@ async function connectToMongo() {
   });
   await client.connect();
   db = client.db("DeesDesigns");
-  console.log("connected to mongodb: " + URI);
-}
+  console.log("connected to mongodb: " + URI + JSON.stringify(db.listCollections().toArray()));
+} 
 
 async function basicAuth(req, res, next) {
   const authHeader = req.headers.authorization; //gets authorization method if there is any(-H'Authorization:'<auth methods>...)
@@ -68,6 +68,7 @@ async function basicAuth(req, res, next) {
   const credentials = base64.decode(base64Credentials).split(":");
   const email = credentials[0];
   const password = credentials[1];
+  
 
   //checking if email exists and password is correct
   const customersCol = db.collection("customers");
@@ -1123,4 +1124,5 @@ app.get("/confirmCartRequest", async (req, res) => {
 app.listen(port, "0.0.0.0",async () => {
   console.log(`The server has started on the link http://localhost:${port}`);
   await connectToMongo();
+  console.log(db)
 });
