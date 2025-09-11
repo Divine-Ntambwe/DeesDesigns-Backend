@@ -53,43 +53,44 @@ async function connectToMongo() {
   console.log("connected to mongodb");
 } 
 
-// async function basicAuth(req, res, next) {
-//   const authHeader = req.headers.authorization; //gets authorization method if there is any(-H'Authorization:'<auth methods>...)
+async function basicAuth(req, res, next) {
+  const authHeader = req.headers.authorization; //gets authorization method if there is any(-H'Authorization:'<auth methods>...)
 
-//   if (!authHeader || !authHeader.startsWith("Basic ")) {
-//     //checks if there is an auth method and checks if it's basic
-//     return res
-//       .status(401)
-//       .json({ error: "Authorization header missingg or invalid" });
-//   }
+  if (!authHeader || !authHeader.startsWith("Basic ")) {
+    //checks if there is an auth method and checks if it's basic
+    return res
+      .status(401)
+      .json({ error: "Authorization header missingg or invalid" });
+  }
 
-//   //spliiting the credentials into user and password
-//   const base64Credentials = authHeader.split(" ")[1];
-//   const credentials = base64.decode(base64Credentials).split(":");
-//   const email = credentials[0];
-//   const password = credentials[1];
+  //spliiting the credentials into user and password
+  const base64Credentials = authHeader.split(" ")[1];
+  console.log(base64Credentials)
+  const credentials = base64.decode(base64Credentials).split(":");
+  const email = credentials[0];
+  const password = credentials[1];
   
 
-//   //checking if email exists and password is correct
-//   const customersCol = db.collection("customers");
-//   const cust = await customersCol.findOne({ email: email });
+  //checking if email exists and password is correct
+  const customersCol = db.collection("customers");
+  const cust = await customersCol.findOne({ email: email });
 
-//   const designersCol = db.collection("designers");
-//   const des = await designersCol.findOne({ email: email });
+  const designersCol = db.collection("designers");
+  const des = await designersCol.findOne({ email: email });
 
-//   if (!cust && !des) {
-//     return res.status(401).json({ error: "user not found" });
-//   }
+  if (!cust && !des) {
+    return res.status(401).json({ error: "user not found" });
+  }
 
-//   const userPassword = cust ? cust.password : des.password;
+  const userPassword = cust ? cust.password : des.password;
 
-//   if (userPassword !== password) {
-//     return res.status(401).json({ error: "Invalid Password" });
-//   }
+  if (userPassword !== password) {
+    return res.status(401).json({ error: "Invalid Password" });
+  }
 
-//   req.user = cust || des;
-//   next();
-// }
+  req.user = cust || des;
+  next();
+}
 
 //posting sign up details to customers collection if user is a customer
 app.post("/customersSignUp", async (req, res) => {
@@ -279,7 +280,7 @@ app.post("/userLogin", async (req, res) => {
   }
 });
 
-// app.use(basicAuth);
+app.use(basicAuth);
 
 //getting all stock products so it can be displayed on the product pages
 app.get("/stockProducts", async (req, res) => {
