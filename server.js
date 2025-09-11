@@ -50,7 +50,7 @@ async function connectToMongo() {
   });
   await client.connect();
   db = client.db("DeesDesigns");
-  console.log("connected to mongodb: " + URI + JSON.stringify(db.listCollections().toArray()));
+  console.log("connected to mongodb");
 } 
 
 async function basicAuth(req, res, next) {
@@ -1124,5 +1124,4 @@ app.get("/confirmCartRequest", async (req, res) => {
 app.listen(port, "0.0.0.0",async () => {
   console.log(`The server has started on the link http://localhost:${port}`);
   await connectToMongo();
-  console.log(db)
 });
