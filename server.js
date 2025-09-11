@@ -11,6 +11,7 @@ const { v4: uuidv4 } = require("uuid");
 const { match } = require("assert");
 const nodemailer = require("nodemailer");
 const crypto = require("crypto");
+const { error } = require("console");
 app.use(express.json());
 app.use(cors());
 
@@ -19,7 +20,6 @@ const storage = multer.diskStorage({
     cb(null, "uploads");
   },
   filename: (req, file, cb) => {
-    console.log(file);
     cb(null, uuidv4() + file.originalname);
   },
 });
@@ -60,7 +60,7 @@ async function basicAuth(req, res, next) {
     //checks if there is an auth method and checks if it's basic
     return res
       .status(401)
-      .json({ message: "Authorization header missing or invalid" });
+      .json({ error: "Authorization header missing or invalid" });
   }
 
   //spliiting the credentials into user and password
@@ -77,15 +77,13 @@ async function basicAuth(req, res, next) {
   const des = await designersCol.findOne({ email: email });
 
   if (!cust && !des) {
-    return res.status(401).json({ message: "user not found" });
+    return res.status(401).json({ error: "user not found" });
   }
 
-  const decodedPW = cust
-    ? base64.decode(cust.password)
-    : base64.decode(des.password);
+  const userPassword = cust ? cust.password : des.password;
 
-  if (decodedPW !== password) {
-    return res.status(401).json({ message: "Invalid Password" });
+  if (userPassword !== password) {
+    return res.status(401).json({ error: "Invalid Password" });
   }
 
   req.user = cust || des;
@@ -141,7 +139,13 @@ app.post("/customersSignUp", async (req, res) => {
     const newUser = await customersCol.insertOne({
       ...userDetails,
     });
-    res.status(200).json({ message: "Successfully signed up", _id:newUser.insertedId,...userDetails });
+    res
+      .status(200)
+      .json({
+        message: "Successfully signed up",
+        _id: newUser.insertedId,
+        ...userDetails,
+      });
   } catch (error) {
     console.error("Error signining customer up: ", error);
     res.status(status).json({ error: message });
@@ -215,13 +219,15 @@ app.post("/designersSignUp", upload.single("pfp"), async (req, res) => {
     const newUser = await designersCol.insertOne({
       ...userDetails,
       pfpPath,
+      rating:[]
     });
     if (newUser) {
       res.status(200).json({
         message: "Successfully signed up",
-        _id:newUser.insertedId,
+        _id: newUser.insertedId,
         ...userDetails,
-        pfpPath   
+        pfpPath,
+        rating:[]
       });
     } else {
       throw new Error("Could not sign up");
@@ -272,7 +278,7 @@ app.post("/userLogin", async (req, res) => {
   }
 });
 
-// app.use(basicAuth);
+app.use(basicAuth);
 
 //getting all stock products so it can be displayed on the product pages
 app.get("/stockProducts", async (req, res) => {
@@ -310,33 +316,33 @@ app.get("/allDesignerProducts", async (req, res) => {
   }
 });
 
-//getting a particular stock product when a user wants more information on it
-app.get("/stockProduct/:stockProductId", async (req, res) => {
-  try {
-    const prodId = req.params.stockProductId;
-    const stockProducts = db.collection("stockProducts");
-    res
-      .status(200)
-      .json(await stockProducts.findOne({ stockProductId: prodId }));
-  } catch (error) {
-    console.error("Error getting stock product: ", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-});
+// //getting a particular stock product when a user wants more information on it
+// app.get("/stockProduct/:stockProductId", async (req, res) => {
+//   try {
+//     const prodId = req.params.stockProductId;
+//     const stockProducts = db.collection("stockProducts");
+//     res
+//       .status(200)
+//       .json(await stockProducts.findOne({ stockProductId: prodId }));
+//   } catch (error) {
+//     console.error("Error getting stock product: ", error);
+//     res.status(500).json({ message: "Internal server error" });
+//   }
+// });
 
-//getting a particular designer product when a user wants more information on it
-app.get("/designersProduct/:designerProductId", async (req, res) => {
-  try {
-    const prodId = req.params.designerProductId;
-    const designersProducts = db.collection("designersProducts");
-    res
-      .status(200)
-      .json(await designersProducts.findOne({ designerProductId: prodId }));
-  } catch (error) {
-    console.error("Error getting designer product: ", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-});
+// //getting a particular designer product when a user wants more information on it
+// app.get("/designersProduct/:designerProductId", async (req, res) => {
+//   try {
+//     const prodId = req.params.designerProductId;
+//     const designersProducts = db.collection("designersProducts");
+//     res
+//       .status(200)
+//       .json(await designersProducts.findOne({ designerProductId: prodId }));
+//   } catch (error) {
+//     console.error("Error getting designer product: ", error);
+//     res.status(500).json({ message: "Internal server error" });
+//   }
+// });
 
 //getting all reviews relating to a specific product
 app.get("/reviews/:productId", async (req, res) => {
@@ -344,8 +350,20 @@ app.get("/reviews/:productId", async (req, res) => {
     const prodId = req.params.productId;
     const reviewsCol = db.collection("reviews");
     const allReviews = await reviewsCol.find({ productId: prodId }).toArray();
-    console.log(prodId);
     res.status(200).json(allReviews ? allReviews : "No reviews yet");
+  } catch (error) {
+    console.error("Error getting reviews: ", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.get("/designerReviews/:designerId", async (req, res) => {
+  try {
+    const designerId = req.params.designerId;
+    const reviewsCol = db.collection("reviews");
+    const allReviews = await reviewsCol.find({ designerId }).toArray();
+    res.status(200).json(allReviews ? allReviews : "No reviews yet");
+    console.log(allReviews, designerId);
   } catch (error) {
     console.error("Error getting reviews: ", error);
     res.status(500).json({ message: "Internal server error" });
@@ -409,105 +427,105 @@ app.get("/cart/:customerId", async (req, res) => {
   }
 });
 
-//removing all checked out items from a users cart
-app.delete("/removeCheckedOutItems/:customerId", async (req, res) => {
-  try {
-    const custId = req.params.customerId;
-    const result = await db
-      .collection("cart")
-      .deleteMany({ customerId: custId });
+// //removing all checked out items from a users cart
+// app.delete("/removeCheckedOutItems/:customerId", async (req, res) => {
+//   try {
+//     const custId = req.params.customerId;
+//     const result = await db
+//       .collection("cart")
+//       .deleteMany({ customerId: custId });
 
-    if (result.deletedCount) {
-      res.status(200).json({ message: "successfully deleted items" });
-    } else {
-      throw new Error("couldn't delete");
-    }
-  } catch (error) {
-    console.error("Error removing all cart items:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-});
+//     if (result.deletedCount) {
+//       res.status(200).json({ message: "successfully deleted items" });
+//     } else {
+//       throw new Error("couldn't delete");
+//     }
+//   } catch (error) {
+//     console.error("Error removing all cart items:", error);
+//     res.status(500).json({ message: "Internal server error" });
+//   }
+// });
 
-app.get("/getAddressAndBankDetails/:customerId", async (req, res) => {
-  try {
-    const customerId = req.params.customerId;
-    const bankDetails = await db
-      .collection("usersBankDetails")
-      .findOne({ userId: customerId });
-    const addressDetails = await db
-      .collection("customersAddress")
-      .findOne({ customerId });
+// app.get("/getAddressAndBankDetails/:customerId", async (req, res) => {
+//   try {
+//     const customerId = req.params.customerId;
+//     const bankDetails = await db
+//       .collection("usersBankDetails")
+//       .findOne({ userId: customerId });
+//     const addressDetails = await db
+//       .collection("customersAddress")
+//       .findOne({ customerId });
 
-    res.status(200).json({ ...bankDetails, ...addressDetails });
-  } catch (error) {
-    console.error("Error getting Address and Bank details:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-});
+//     res.status(200).json({ ...bankDetails, ...addressDetails });
+//   } catch (error) {
+//     console.error("Error getting Address and Bank details:", error);
+//     res.status(500).json({ message: "Internal server error" });
+//   }
+// });
 
-//posting new bank details
-app.post("/usersBankDetails/:customerId", async (req, res) => {
-  let status = 500;
-  let message = "Internal server error";
-  try {
-    const invalid = () => {
-      status = 401;
-      message = "invalid input";
-    };
+// //posting new bank details
+// app.post("/usersBankDetails/:customerId", async (req, res) => {
+//   let status = 500;
+//   let message = "Internal server error";
+//   try {
+//     const invalid = () => {
+//       status = 401;
+//       message = "invalid input";
+//     };
 
-    const details = req.body; //cvv: cardNumber: expiryDate:YYYY-MM-DD
-    const custId = req.params.customerId;
+//     const details = req.body; //cvv: cardNumber: expiryDate:YYYY-MM-DD
+//     const custId = req.params.customerId;
 
-    if (details.cardNumber.replaceAll(" ", "").length !== 16) {
-      invalid();
-      throw new Error("invalid card number");
-    }
+//     if (details.cardNumber.replaceAll(" ", "").length !== 16) {
+//       invalid();
+//       throw new Error("invalid card number");
+//     }
 
-    if (
-      (await db
-        .collection("userBankDetails")
-        .findOne({ cardNumber: details.cardNumber })) !== null
-    ) {
-      invalid();
-      throw new Error("bank details already exists");
-    }
+//     if (
+//       (await db
+//         .collection("userBankDetails")
+//         .findOne({ cardNumber: details.cardNumber })) !== null
+//     ) {
+//       invalid();
+//       throw new Error("bank details already exists");
+//     }
 
-    if (details.cvv.length !== 4) {
-      invalid();
-      throw new Error("Invalid CVV number");
-    }
-    const expDate = new Date(details.expiryDate);
-    console.log(new Date());
-    if (expDate < new Date()) {
-      invalid();
-      throw new Error("Credit card is already expired");
-    }
-    delete details.expiryDate;
-    result = await db
-      .collection("usersBankDetails")
-      .insertOne({ userId: custId, ...details, expiryDate: expDate });
-    res.status(200).json(result);
-  } catch (error) {
-    console.error(" error saving bank details", error);
-    res.status(status).json({ message: message });
-  }
-});
+//     if (details.cvv.length !== 4) {
+//       invalid();
+//       throw new Error("Invalid CVV number");
+//     }
+//     const expDate = new Date(details.expiryDate);
+//     console.log(new Date());
+//     if (expDate < new Date()) {
+//       invalid();
+//       throw new Error("Credit card is already expired");
+//     }
+//     delete details.expiryDate;
+//     result = await db
+//       .collection("usersBankDetails")
+//       .insertOne({ userId: custId, ...details, expiryDate: expDate });
+//     res.status(200).json(result);
+//   } catch (error) {
+//     console.error(" error saving bank details", error);
+//     res.status(status).json({ message: message });
+//   }
+// });
 
 //posting new address
-app.post("/saveAddress/:customerId", async (req, res) => {
-  try {
-    const details = req.body; //streetAddress: suburb: city: postalCode:
-    const customerId = req.params.customerId;
+// app.post("/saveAddress/:customerId", async (req, res) => {
+//   try {
+//     const details = req.body; //streetAddress: suburb: city: postalCode:
+//     const customerId = req.params.customerId;
 
-    const address = await db
-      .collection("customersAddress")
-      .insertOne({ customerId, ...details });
-    res.status(200).json(address);
-  } catch (error) {
-    console.error("error saving address details", error);
-    res.status(500).json({ message: "Internal Server error" });
-  }
-});
+//     const address = await db
+//       .collection("customersAddress")
+//       .insertOne({ customerId, ...details });
+//     res.status(200).json(address);
+//   } catch (error) {
+//     console.error("error saving address details", error);
+//     res.status(500).json({ message: "Internal Server error" });
+//   }
+// });
 
 //posting order details of the checked out items
 app.post("/orders/:customerId", async (req, res) => {
@@ -589,15 +607,19 @@ app.post("/orders/:customerId", async (req, res) => {
                 { _id: new mongodb.ObjectId(i.productId) },
                 { projection: { name: 1, price: 1, itemsInStock: 1, _id: 0 } }
               )
-          :i.productProvider === "designerProduct"? await db
+          : i.productProvider === "designerProduct"
+          ? await db
               .collection("designersProducts")
               .findOne(
                 { _id: new mongodb.ObjectId(i.productId) },
                 { projection: { name: 1, price: 1, itemsInStock: 1, _id: 0 } }
-              ):{}
+              )
+          : {};
       if (i.productProvider === "designer") break;
       if (!product) {
-        invalid("product " + i.productName + " does not exist anymore");
+        invalid(
+          `The product '${i.productName} - ${i.size}' does not exist anymore `
+        );
         throw new Error("product does not exist anymore");
       }
 
@@ -605,7 +627,7 @@ app.post("/orders/:customerId", async (req, res) => {
 
       if (product.itemsInStock[i.size] < 0) {
         invalid(
-          "product " +
+          "The product " +
             i.productName +
             " is no longer available in the quantity you want"
         );
@@ -716,11 +738,10 @@ app.get("/customerOrders/:customerId", async (req, res) => {
       }
 
       if (
-        new Date().toDateString() ===
-        new Date(
+        Date.parse(new Date()) >=
           Date.parse(`1970/01/${daysInProcess + 3}`) +
-            Date.parse(order.dateOfPurchase)
-        ).toDateString()
+            Date.parse(order.dateOfPurchase) &&
+        new Date().toDateString() !== order.dateOfPurchase.toDateString()
       ) {
         await db
           .collection("orders")
@@ -770,6 +791,50 @@ app.post("/uploadReview/:customerId", async (req, res) => {
         { _id: new mongodb.ObjectId(productId) },
         { $push: { rating: rating } }
       );
+    res.status(200).json({ message: "successfully uploaded" });
+  } catch (error) {
+    console.error("error creating review", error);
+    res.status(status).json({ message: message });
+  }
+});
+
+//posting a review for designer a user leaves
+app.post("/uploadReviewForDesigner", async (req, res) => {
+  let status = 500;
+  let message = "Internal server error";
+  try {
+    const invalid = (m = message) => {
+      status = 401;
+      message = m;
+    };
+
+    const { name, surname, review, rating, productId } = req.body;
+
+    const product = await db
+      .collection("designersProducts")
+      .findOne({ _id: new mongodb.ObjectId(productId) });
+    const designerId = product ? product.designerId : productId;
+    if (review) {
+      await db.collection("reviews").insertOne({
+        name,
+        surname,
+        designerId,
+        dateOfUpload: new Date(),
+        review,
+        rating,
+      });
+    }
+
+    const result = await db
+      .collection("designers")
+      .updateOne(
+        { _id: new mongodb.ObjectId(designerId) },
+        { $push: { rating: rating } }
+      );
+
+    if (!result.modifiedCount) {
+      throw new Error("Could not update designer rating");
+    }
     res.status(200).json({ message: "successfully uploaded" });
   } catch (error) {
     console.error("error creating review", error);
@@ -846,7 +911,7 @@ app.put(
       if (req.file) {
         updates.imagePath = req.file.path;
       }
-      console.log(desProdId);
+
       const result = await db
         .collection("designersProducts")
         .updateOne(
@@ -880,134 +945,163 @@ app.get("/designersContactInfo", async (req, res) => {
             email: 1,
             gender: 1,
             pfpPath: 1,
+            rating: 1,
           },
         }
       )
       .toArray();
-
+    if (!result){
+      res.status(400),json({message:"user not found"})
+    }
     res.status(200).json(result);
-  } catch (error) {
+  } catch (error) { 
     console.error("error getting designer's products", error);
     res.status(500).json({ message: "internal server error" });
   }
 });
 
-app.post("/SendDesignToCustomer/:designerId",  upload.single("custProductImage"),async (req, res) => {
+app.put("/editDesignerInfo/:designerId", upload.single("desNewPfp"), async (req, res) => {
+  try {
+    const id = req.params.designerId;
+    const {phoneNumber} = JSON.parse(req.body.details);
+    const result = req.file? await db.collection("designers").updateOne({_id: new mongodb.ObjectId(id)},{$set:{phoneNumber,pfpPath: req.file.path}}):
+    await db.collection("designers").updateOne({_id: new mongodb.ObjectId(id)},{$set:{phoneNumber}});
+   
+   req.file && result? res.status(200).json({pfpPath:req.file.path}): !req.file && result?res.status(200).json({message:"successful"}):res.status(400).json({error:"could not update profile, user not found"})
+  } catch (error) {
+    console.error("error updating profile", error);
+    res.status(500).json({ message: "internal server error" });
+  }
+});
+
+app.post(
+  "/SendDesignToCustomer/:designerId",
+  upload.single("custProductImage"),
+  async (req, res) => {
+    let status = 500;
+    let message = "Internal server error";
+
+    try {
+      const invalid = (m = "invalid input") => {
+        status = 401;
+        message = m;
+      };
+      const designerId = req.params.designerId;
+
+      const { customerEmail, name, uploadedBy, imgPath } = JSON.parse(
+        req.body.details
+      );
+
+      const customer = await db
+        .collection("customers")
+        .findOne({ email: customerEmail });
+
+      if (!customer) {
+        invalid("Customer not found");
+        throw new Error("customer not found");
+      }
+
+      const token = crypto.randomBytes(20).toString("hex");
+      const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+      const link = `http://localhost:5000/confirmCartRequest?token=${token}`;
+
+      await transporter.sendMail({
+        from: "becalisjohnson@gmail.com",
+        to: customerEmail,
+        subject: "Confirm Designer Product Request",
+        html: `<p>The Designer ${uploadedBy} has sent a request for you to add the product ${name} to your cart  <a href="${link}">Click here to confirm</a></p> 
+      <br>
+      <p>If you did not request this product simply ignore this email<p>
+      `,
+      });
+
+      const cartRequest = await db
+        .collection("customerCartRequests")
+        .insertOne({
+          designerId,
+          customerId: customer._id.toString(),
+          ...JSON.parse(req.body.details),
+          imagePath: req.file.path,
+          size: "M",
+          quantity: 1,
+          expiresAt,
+          token,
+        });
+
+      res.status(200).send({ message: "succcessfully sent" });
+    } catch (error) {
+      console.error("Error sending email: ", error);
+      res.status(status).json({ error: message });
+    }
+  }
+);
+
+app.get("/confirmCartRequest", async (req, res) => {
   let status = 500;
   let message = "Internal server error";
-
   try {
     const invalid = (m = "invalid input") => {
       status = 401;
       message = m;
     };
-    const designerId = req.params.designerId;
-
-    const {
-      customerEmail,
-      name,
-      uploadedBy
-    } = JSON.parse(req.body.details);
-
-    const customer = await db
-      .collection("customers")
-      .findOne({ email: customerEmail });
-
-    if (!customer) {
-      invalid("Customer not found");
-      throw new Error("customer not found");
-    }
-
-    const token = crypto.randomBytes(20).toString("hex");
-    const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
-    const link = `http://localhost:5000/confirmCartRequest?token=${token}`; 
-
-    await transporter.sendMail({
-      from: "becalisjohnson@gmail.com",
-      to: customerEmail,
-      subject: "Confirm Designer Product Request",
-      html: `<p>The Designer ${uploadedBy} has sent a request for you to add the product ${name} to your cart click here to confirm:</p> <br/> <a href="${link}">Click here to confirm</a>`,
-    });
-
-     const cartRequest = await db
+    const { token } = req.query;
+    const request = await db
       .collection("customerCartRequests")
-      .insertOne({
-        customerId: customer._id.toString(),
-        ...JSON.parse(req.body.details),
-        imagePath:req.file.path,
-        size: "M",
-        quantity: 1,
-        expiresAt,
-        token
-      });
-      
-      res.status(200).send({message:"succcessfully sent"})
-  } catch (error) {
-    console.error("Error sending email: ", error);
-    res.status(status).json({ error: message });
-  }
-});
+      .findOne({ token });
 
-app.get("/confirmCartRequest", async (req, res) => {
-  let status = 500;
-  let message = "Internal server error";
- try{
-   const invalid = (m = "invalid input") => {
-      status = 401;
-      message = m;
-    };
-  const { token } = req.query;
-  const request = await db.collection("customerCartRequests").findOne({ token });
-
-  if (!request) {
-   res.send(`
+    if (!request) {
+      res.send(`
       <div style="color:#d07a7a;
                   height:90vh;display:flex;flex-direction:column;
                   align-items:center;justify-content:center;font-family:Arial">
         <h1 style="font-size:2.5rem;">❌ Invalid or Expired Link</h1>
         <p style="margin-top:10px;">Please request a new confirmation email.</p>
       </div>
-    `) 
-   invalid("Invalid Token")
-   throw new Error("Invalid Token")
-   
-  }
+    `);
+      invalid("Invalid Token");
+      throw new Error("Invalid Token");
+    }
 
-  if (Date.now() > request.expiresAt){
-    res.send(`
+    if (Date.now() > request.expiresAt) {
+      res.send(`
       <div style="color:#d07a7a;
                   height:90vh;display:flex;flex-direction:column;
                   align-items:center;justify-content:center;font-family:Arial">
         <h1 style="font-size:2.5rem;">⌛ Link Expired</h1>
         <p  style="margin-top:10px;">Please request a new confirmation email.</p>
       </div>
-    `)
-    invalid("Token expired")
-    throw new Error("Token expired");
+    `);
+      invalid("Token expired");
+      throw new Error("Token expired");
     }
-  
 
-   const {customerId,
+    const {
+      customerId,
+      designerId,
       name,
       price,
       imagePath,
       productProvider,
       size,
-      quantity} = request;
+      quantity,
+    } = request;
 
     const cartCol = db.collection("cart");
-    const result = await cartCol.insertOne({customerId,
-      productName:name,
+    const result = await cartCol.insertOne({
+      customerId,
+      productName: name,
+      designerId,
       price,
-      imgPath:imagePath,
+      imgPath: imagePath,
       productProvider,
       size,
-      quantity});
+      quantity,
+    });
 
-      if (result){
-        await db.collection("customerCartRequests").deleteOne({ token });
-        res.status(200)
-        res.send(`
+    if (result) {
+      await db.collection("customerCartRequests").deleteOne({ token });
+      res.status(200);
+      res.send(`
     <div style="color:#d07a7a;
                 height:100vh;display:flex;flex-direction:column;
                 align-items:center;justify-content:center;font-family:raleway">
@@ -1016,15 +1110,14 @@ app.get("/confirmCartRequest", async (req, res) => {
        <p style="margin-top:10px;font-size:4.5rem;">You can now view product in your cart <a href="http://localhost:5173/Home">Home</a>.</p>
        
     </div>
-  `)
-      } else {
-        throw new Error("couldn't confirm email")
-      }
-
- }catch(error){
-   console.error("Error confirming email: ", error);
-   res.status(status).json({ error: message });
- }
+  `);
+    } else {
+      throw new Error("couldn't confirm email");
+    }
+  } catch (error) {
+    console.error("Error confirming email: ", error);
+    res.status(status).json({ error: message });
+  }
 });
 
 app.listen(port, async () => {
