@@ -50,7 +50,7 @@ async function connectToMongo() {
   });
   await client.connect();
   db = client.db("DeesDesigns");
-  console.log("connected to mongodb");
+  console.log("connected to mongodb: " + URI);
 }
 
 async function basicAuth(req, res, next) {
