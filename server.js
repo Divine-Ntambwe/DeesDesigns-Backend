@@ -47,8 +47,6 @@ async function connectToMongo() {
       strict: true,
       deprecationErrors: true,
     },
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
   });
   await client.connect();
   db = client.db("DeesDesigns");
