@@ -279,7 +279,7 @@ app.post("/userLogin", async (req, res) => {
   }
 });
 
-app.use(basicAuth);
+// app.use(basicAuth);
 
 //getting all stock products so it can be displayed on the product pages
 app.get("/stockProducts", async (req, res) => {
