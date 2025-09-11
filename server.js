@@ -60,7 +60,7 @@ async function basicAuth(req, res, next) {
     //checks if there is an auth method and checks if it's basic
     return res
       .status(401)
-      .json({ error: "Authorization header missing or invalid" });
+      .json({ error: "Authorization header missingg or invalid" });
   }
 
   //spliiting the credentials into user and password
