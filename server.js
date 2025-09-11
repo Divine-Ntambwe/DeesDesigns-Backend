@@ -1120,7 +1120,7 @@ app.get("/confirmCartRequest", async (req, res) => {
   }
 });
 
-app.listen(port,  "0.0.0.0",async () => {
-  console.log(`The server has started on http://localhost:${port}`);
+app.listen(port, "0.0.0.0",async () => {
+  console.log(`The server has started on the link http://localhost:${port}`);
   await connectToMongo();
 });
