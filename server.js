@@ -37,11 +37,11 @@ const transporter = nodemailer.createTransport({
 
 const port = process.env.port || 5000;
 
-const uri = process.env.DEESDESIGNS_CONNECTION_STRING;
+const URI = process.env.URI;
 let client, db;
 
 async function connectToMongo() {
-  client = new mongodb.MongoClient(uri, {
+  client = new mongodb.MongoClient(URI, {
     serverApi: {
       version: mongodb.ServerApiVersion.v1,
       strict: true,
