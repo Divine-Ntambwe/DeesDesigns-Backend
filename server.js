@@ -113,6 +113,14 @@ app.post("/customersSignUp", async (req, res) => {
       throw new Error("User already exists please log in");
     }
 
+    if (
+      userDetails.mobileNumber.replaceAll(" ", "").length !== 10 ||
+      userDetails.mobileNumber.startsWith("0") == false
+    ) {
+      invalid("Phone number is invalid");
+      throw new Error("Phone number is invalid");
+    }
+
     if (userDetails.password.length < 8) {
       invalid("Password Too Short");
       throw new Error("Password Too Short");
