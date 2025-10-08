@@ -287,6 +287,90 @@ app.post("/userLogin", async (req, res) => {
   }
 });
 
+app.get("/confirmCartRequest", async (req, res) => {
+  let status = 500;
+  let message = "Internal server error";
+  try {
+    const invalid = (m = "invalid input") => {
+      status = 401;
+      message = m;
+    };
+    const { token } = req.query;
+    const request = await db
+      .collection("customerCartRequests")
+      .findOne({ token });
+
+    if (!request) {
+      res.send(`
+      <div style="color:#d07a7a;
+                  height:90vh;display:flex;flex-direction:column;
+                  align-items:center;justify-content:center;font-family:Arial">
+        <h1 style="font-size:2.5rem;">❌ Invalid or Expired Link</h1>
+        <p style="margin-top:10px;">Please request a new confirmation email.</p>
+      </div>
+    `);
+      invalid("Invalid Token");
+      throw new Error("Invalid Token");
+    }
+
+    if (Date.now() > request.expiresAt) {
+      res.send(`
+      <div style="color:#d07a7a;
+                  height:90vh;display:flex;flex-direction:column;
+                  align-items:center;justify-content:center;font-family:Arial">
+        <h1 style="font-size:2.5rem;">⌛ Link Expired</h1>
+        <p  style="margin-top:10px;">Please request a new confirmation email.</p>
+      </div>
+    `);
+      invalid("Token expired");
+      throw new Error("Token expired");
+    }
+
+    const {
+      customerId,
+      designerId,
+      name,
+      price,
+      imagePath,
+      productProvider,
+      size,
+      quantity,
+    } = request;
+
+    const cartCol = db.collection("cart");
+    const result = await cartCol.insertOne({
+      customerId,
+      productName: name,
+      designerId,
+      price,
+      imgPath: imagePath,
+      productProvider,
+      size,
+      quantity,
+    });
+
+    if (result) {
+      await db.collection("customerCartRequests").deleteOne({ token });
+      res.status(200);
+      res.send(`
+    <div style="color:#d07a7a;
+                height:100vh;display:flex;flex-direction:column;
+                align-items:center;justify-content:center;font-family:raleway">
+      <h1 style="font-size:4.5rem;">Email Confirmed!</h1>
+     
+       <p style="margin-top:10px;font-size:4.5rem;">You can now view product in your cart <a href="http://www.deesdesigns.co.za.s3-website-us-east-1.amazonaws.com/Home">Home</a>.</p>
+       
+    </div>
+  `);
+    } else {
+      throw new Error("couldn't confirm email");
+    }
+  } catch (error) {
+    console.error("Error confirming email: ", error);
+    res.status(status).json({ error: message });
+  }
+});
+
 app.use(basicAuth);
 
 //getting all stock products so it can be displayed on the product pages
@@ -1045,89 +1129,7 @@ app.post(
   }
 );
 
-app.get("/confirmCartRequest", async (req, res) => {
-  let status = 500;
-  let message = "Internal server error";
-  try {
-    const invalid = (m = "invalid input") => {
-      status = 401;
-      message = m;
-    };
-    const { token } = req.query;
-    const request = await db
-      .collection("customerCartRequests")
-      .findOne({ token });
 
-    if (!request) {
-      res.send(`
-      <div style="color:#d07a7a;
-                  height:90vh;display:flex;flex-direction:column;
-                  align-items:center;justify-content:center;font-family:Arial">
-        <h1 style="font-size:2.5rem;">❌ Invalid or Expired Link</h1>
-        <p style="margin-top:10px;">Please request a new confirmation email.</p>
-      </div>
-    `);
-      invalid("Invalid Token");
-      throw new Error("Invalid Token");
-    }
-
-    if (Date.now() > request.expiresAt) {
-      res.send(`
-      <div style="color:#d07a7a;
-                  height:90vh;display:flex;flex-direction:column;
-                  align-items:center;justify-content:center;font-family:Arial">
-        <h1 style="font-size:2.5rem;">⌛ Link Expired</h1>
-        <p  style="margin-top:10px;">Please request a new confirmation email.</p>
-      </div>
-    `);
-      invalid("Token expired");
-      throw new Error("Token expired");
-    }
-
-    const {
-      customerId,
-      designerId,
-      name,
-      price,
-      imagePath,
-      productProvider,
-      size,
-      quantity,
-    } = request;
-
-    const cartCol = db.collection("cart");
-    const result = await cartCol.insertOne({
-      customerId,
-      productName: name,
-      designerId,
-      price,
-      imgPath: imagePath,
-      productProvider,
-      size,
-      quantity,
-    });
-
-    if (result) {
-      await db.collection("customerCartRequests").deleteOne({ token });
-      res.status(200);
-      res.send(`
-    <div style="color:#d07a7a;
-                height:100vh;display:flex;flex-direction:column;
-                align-items:center;justify-content:center;font-family:raleway">
-      <h1 style="font-size:4.5rem;">Email Confirmed!</h1>
-     
-       <p style="margin-top:10px;font-size:4.5rem;">You can now view product in your cart <a href="http://www.deesdesigns.co.za.s3-website-us-east-1.amazonaws.com/Home">Home</a>.</p>
-       
-    </div>
-  `);
-    } else {
-      throw new Error("couldn't confirm email");
-    }
-  } catch (error) {
-    console.error("Error confirming email: ", error);
-    res.status(status).json({ error: message });
-  }
-});
 
 app.listen(port, "0.0.0.0",async () => {
   console.log(`The server has started on the link http://${process.env.ElasticIP}:${port}`);
