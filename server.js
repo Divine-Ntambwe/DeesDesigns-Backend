@@ -1012,7 +1012,7 @@ app.post(
 
       const token = crypto.randomBytes(20).toString("hex");
       const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
-      const link = `http://${process.env.ElasticIP}/confirmCartRequest?token=${token}`;
+      const link = `http://${process.env.ElasticIP}:5000/confirmCartRequest?token=${token}`;
 
       await transporter.sendMail({
         from: "becalisjohnson@gmail.com",
