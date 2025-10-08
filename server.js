@@ -359,7 +359,7 @@ app.get("/reviews/:productId", async (req, res) => {
     const prodId = req.params.productId;
     const reviewsCol = db.collection("reviews");
     const allReviews = await reviewsCol.find({ productId: prodId }).toArray();
-    res.status(200).json(allReviews ? allReviews : "No reviews yet");
+    res.status(200).json(allReviews.length ? allReviews : "No reviews yet");
   } catch (error) {
     console.error("Error getting reviews: ", error);
     res.status(500).json({ message: "Internal server error" });
@@ -1012,7 +1012,7 @@ app.post(
 
       const token = crypto.randomBytes(20).toString("hex");
       const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
-      const link = `http://localhost:5000/confirmCartRequest?token=${token}`;
+      const link = `http://${process.env.ElasticIP}/confirmCartRequest?token=${token}`;
 
       await transporter.sendMail({
         from: "becalisjohnson@gmail.com",
@@ -1116,7 +1116,7 @@ app.get("/confirmCartRequest", async (req, res) => {
                 align-items:center;justify-content:center;font-family:raleway">
       <h1 style="font-size:4.5rem;">Email Confirmed!</h1>
      
-       <p style="margin-top:10px;font-size:4.5rem;">You can now view product in your cart <a href="http://localhost:5173/Home">Home</a>.</p>
+       <p style="margin-top:10px;font-size:4.5rem;">You can now view product in your cart <a href="http://www.deesdesigns.co.za.s3-website-us-east-1.amazonaws.com/Home">Home</a>.</p>
        
     </div>
   `);
@@ -1130,6 +1130,6 @@ app.get("/confirmCartRequest", async (req, res) => {
 });
 
 app.listen(port, "0.0.0.0",async () => {
-  console.log(`The server has started on the link http://localhost:${port}`);
+  console.log(`The server has started on the link http://${process.env.ElasticIP}:${port}`);
   await connectToMongo();
 });
