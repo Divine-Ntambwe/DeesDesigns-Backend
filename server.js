@@ -8,9 +8,42 @@ const port = process.env.port || 8000;
 const uri = process.env.MONGODB_DEEINDER;
 const cors = require("cors");
 
+
+const http = require("http");
+const {Server} = require("socket.io");
+const server = http.createServer(app);
+const io = new Server (
+  server,{
+  cors:{
+    origin: "http://localhost:3000"
+  }
+}
+)
+
+io.on("connection",(socket)=>{
+  socket.on("join_room",(data)=>{
+    socket.join(data)
+    console.log(data)
+  })
+
+  socket.on("send_message",(data)=>{
+    socket.to(data.room).emit("recieve_message",data)
+    console.log(data)
+  })
+
+
+
+  socket.on("disconnect",()=>{
+    // console.log("User disconnected",socket.id)
+  })
+})
+
 const multer = require("multer");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
+const fs = require("fs");
+const { send } = require("process");
+
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -153,7 +186,7 @@ app.post("/signUp", upload.single("pfp"), async (req, res) => {
         picsPath: [],
         profileStatus: true,
       });
-    res.status(200).json({ message: "successfully signed up" });
+    res.status(200).json({ message: "successfully signed up",fullName, username, email,gender });
   } catch (error) {
     console.error("Error signing user up", error);
     res.status(status).send({ error: message });
@@ -162,7 +195,6 @@ app.post("/signUp", upload.single("pfp"), async (req, res) => {
 
 //logging in (checking password and email)
 app.post("/login", async (req, res) => {
-  console.log(req.body);
   let status = 500;
   let message = "Internal server error";
   const invalid = (m) => {
@@ -183,19 +215,20 @@ app.post("/login", async (req, res) => {
 
     const user = await membersCol.findOne(
       { email },
-      { projection: { email: 1, password: 1, username: 1 } }
+      { projection: { email: 1, password: 1, username: 1,gender:1,fullName:1} }
     );
     if (!user) {
       invalid("Email does not exist, please sign up");
       throw new Error("Email does not exist, please sign up");
     }
 
-    const decodedPassword = user.password; //base64.decode(user.password);
+    const decodedPassword = base64.decode(user.password);
     if (decodedPassword !== password) {
       invalid("Incorrect password");
       throw new Error("Incorrect password");
     }
 
+    delete user.password
     res.status(200).json({ message: "successfully signed in", ...user });
   } catch (error) {
     console.error("Error logging user in", error);
@@ -211,14 +244,14 @@ app.post("/UploadPfp", upload.single("pfp"), async (req, res) => {
 //getting all members profiles to display on home page
 app.get("/membersProfiles", async (req, res) => {
   try {
-    console.log("eh?")
+
     const memProfilesCol = db.collection("membersProfile");
     const membersInfoCol = db.collection("membersPersonalInfo");
 
     const profiles = await memProfilesCol
       .find(
         { profileStatus: true },
-        { projection: { relationshipIntent: 1, likes: 1, shortDescription: 1 } }
+        { projection: {_id:0,username:0 } }
       ) 
       .toArray();
     const membersInfo = await membersInfoCol
@@ -228,9 +261,9 @@ app.get("/membersProfiles", async (req, res) => {
           projection: {
             age: 1,
             fullName: 1,
-            username: 1,
+            username: 1, 
             gender: 1,
-            pfpPath: 1,
+            pfpPath: 1            
           },
         }
       )
@@ -240,8 +273,7 @@ app.get("/membersProfiles", async (req, res) => {
     for (let i = 0; i < membersInfo.length; i++) {
       members.push({ ...membersInfo[i], ...profiles[i] });
     }
-    console.log({...members})
-    res.status(200).json({ ...members });
+    res.status(200).json( [...members] );
   } catch (error) {
     console.error("error getting all members", error);
     res.status(500).json({ message: "Internal server error" });
@@ -261,13 +293,13 @@ app.get("/memberProfile/:username", async (req, res) => {
     const memProfilesCol = db.collection("membersProfile");
     const membersInfoCol = db.collection("membersPersonalInfo");
     const username = req.params.username;
-
+    
     const profile = await memProfilesCol.findOne({ username }, {});
     const memberInfo = await membersInfoCol.findOne(
       { username },
       { projection: { age: 1, fullName: 1, username: 1, pfpPath: 1 } }
     );
-
+    
     let member = { ...memberInfo, ...profile };
     if (memberInfo) {
       res.status(200).json({ ...member });
@@ -304,6 +336,8 @@ app.post(
           hasAccepted: false,
           dateAccepted: null,
         });
+
+      
       if (result) {
         res.status(200).json({ message: "successfully sent request" });
       } else {
@@ -327,6 +361,7 @@ app.put("/likeProfile/:likerUsername/:memberUsername", async (req, res) => {
       { username: member },
       { $push: { likes: liker } }
     );
+    console.log("hehe ")
 
     if (result.modifiedCount === 1) {
       res.status(200).json({ message: "Successfully updated" });
@@ -372,15 +407,22 @@ app.put("/UpdatemembersPersonalInfo/:username",upload.single("pfp"), async (req,
   try {
     const updates = JSON.parse(req.body.updates);
     const username = req.params.username;
-    console.log(updates)
 
-    if (updates.username) {
+    if (updates.username && updates.username !== username) {
       const newUsername = updates.username;
       if (
         await db.collection("membersProfile").findOne({ username: newUsername })
       ) {
         invalid();
         throw new Error("Username already exists");
+      } 
+    }
+
+    if (req.file){
+     
+      const newPfpResult = await db.collection("membersPersonalInfo").updateOne({username},{$set:{pfpPath:req.file.path}})
+      if (!newPfpResult.modifiedCount){
+        throw new Error("Could not update profile pic");
       }
     }
 
@@ -388,20 +430,67 @@ app.put("/UpdatemembersPersonalInfo/:username",upload.single("pfp"), async (req,
       .collection("membersProfile")
       .updateOne({ username }, {$set: updates} );
 
-    if (result.modifiedCount === 1) {
-      res.status(200).json({message:"successfully updated"});
-    } else {
-      throw new Error("Could not update profile");
-    }
+     if (updates.username && updates.username !== username) {
+      const usernameResult = await db.collection("membersPersonalInfo").updateOne({username},{$set:{username:updates.username}})
+      if (!usernameResult.modifiedCount){
+        throw new Error("could not update username")
+      }
+    }  
+
+
+   
+    res.status(200).json({message:"successfully updated"});
   } catch (error) {
     console.error("Error updating profile", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
+app.put("/addPictures/:username",upload.single("picture"),async (req,res)=>{
+try {
+  const result = await db.collection("membersProfile").updateOne({username:req.params.username},{$push:{picsPaths: req.file.path}})
+  if(result.modifiedCount){
+    res.status(200).json({message:"successfully updated"})
+  }else{
+    throw new Error("couldn't add picture")
+  }
+}catch(error){
+console.error("Error adding new pictures", error);
+res.status(500).json({ error: "Internal server error" });
+}
+})
+
+app.put("/removePicture/:username",async (req,res)=>{
+try {
+  const path = (req.body.path).slice((req.body.path).indexOf("uploads"),(req.body.path).length);
+
+  const result = await db.collection("membersProfile").updateOne({username:req.params.username},{$pull:{picsPaths: path}});
+
+  
+  if(result.modifiedCount){
+    res.status(200).json({message:"successfully updated"})
+  }else{
+    throw new Error("couldn't remove picture")
+  }
+
+  fs.unlink(path, (err) => {
+    if (err) {
+      return res.status(500).json({ error: 'Failed to delete file' });
+    }
+  });
+
+
+}catch(error){
+console.error("Error adding new pictures", error);
+res.status(500).json({ error: "Internal server error" });
+}
+})
+
+
+
 //getting all connection requests recieved by user
 app.get("/connectionRequests/:username", async (req, res) => {
-  try {
+  try { 
     const username = req.params.username;
 
     const result = await db
@@ -412,11 +501,9 @@ app.get("/connectionRequests/:username", async (req, res) => {
       )
       .toArray();
 
-    if (result.length) {
-      res.status(200).json(result); 
-    } else { 
-      throw new Error("Error getting connection requests");
-    }
+   
+    res.status(200).json(result); 
+   
   } catch (error) {
     console.error("Error getting connection requests", error);
     res.status(500).send({ message: "Internal server error" });
@@ -425,19 +512,25 @@ app.get("/connectionRequests/:username", async (req, res) => {
 
 //updating the hasAccepted and dataAccepted field when a user accepts a connection request
 app.put(
-  "/acceptedConnectionRequest/:recieverUsername/:senderUsername",
+  "/acceptedConnectionRequest/:recieverUsername",
   async (req, res) => {
     try {
-      const senderUsername = req.params.senderUsername;
+      
+      const senderUsername = req.body.senderUsername;
       const recieverUsername = req.params.recieverUsername;
 
       const result = await db
         .collection("connectionRequests")
         .updateOne(
-          { senderUsername, recieverUsername },
+          { senderUsername,recieverUsername },
           { $set: { hasAccepted: true, dateAccepted: new Date() } }
         );
-      if (result.modifiedCount) {
+
+      
+      const updated = await db.collection("membersProfile").updateMany({$or:[{username:recieverUsername},{username:senderUsername}]},{$inc:{connections:1}})    
+
+
+      if (updated.modifiedCount > 1 && result.modifiedCount) {
         res.status(200).json(result);
       } else {
         throw new Error("Error accepting connection request");
@@ -450,18 +543,20 @@ app.put(
 );
 
 //when a user removes a memeber as a connection
-app.put(
-  "/removeConnectionRequest/:recieverUsername/:senderUsername",
+app.delete(
+  "/removeConnectionRequest",
   async (req, res) => {
     try {
-      const senderUsername = req.params.senderUsername;
-      const recieverUsername = req.params.recieverUsername;
+      const senderUsername = req.body.senderUsername;
+      const recieverUsername = req.body.recieverUsername;
+      console.log(req.body)
 
       const deletedResult = await db
         .collection("connectionRequests")
         .deleteOne({ senderUsername, recieverUsername });
-      // const updatedResult = await db.collection("membersProfile").updateMany({$or:[{username:recieverUsername},{username:senderUsername}]},{$inc:{connections: -1}});
-      if (deletedResult.deletedCount) {
+  
+      const updatedResult = await db.collection("membersProfile").updateMany({$or:[{username:recieverUsername},{username:senderUsername}]},{$inc:{connections: -1}});
+      if (deletedResult.deletedCount && updatedResult.modifiedCount) {
         res.status(200).json(deletedResult);
       } else {
         throw new Error("Error removing connection");
@@ -473,17 +568,54 @@ app.put(
   }
 );
 
+//canceling a connection request
+app.delete(
+  "/cancelConnectionRequest",
+  async (req, res) => {
+    try {
+      const senderUsername = req.body.senderUsername;
+      const recieverUsername = req.body.recieverUsername;
+
+      const deletedResult = await db
+        .collection("connectionRequests")
+        .deleteOne({senderUsername, recieverUsername });
+
+      res.status(200).json(deletedResult);
+
+    } catch (error) {
+      console.error("Error cancelling connection request", error);
+      res.status(500).send({ message: "Internal server error" });
+    }
+  }
+);
+
 //getting messages recieved by a user
-app.get("/messages/:recieverId", (req, res) => {
-  res.send("hehe");
-});
+app.get("/messages/:username",async (req, res) => {
+  try {
+    const username = req.params.username;
+    const result = await db.collection("messages").find({$or:[{recieverId:username},{senderId:username}]}).toArray()
 
+    res.json(result)
+  }catch(error){
+     console.error("Error getting messages", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
+});
+ 
 //posting a new message
-app.post("/messages", (req, res) => {
-  res.send("hehe");
+app.post("/sendAMessage",async (req, res) => {
+   try {
+    const username = req.params.username;
+    const result = await db.collection("messages").insertOne(req.body)
+
+    res.send(200)
+  }catch(error){
+    console.error("Error sending messages", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
 });
 
-app.listen(port, async () => {
+server.listen(port, async () => {
   console.log(`Server is running on http://localhost:${port}`);
   await connectToMongo();
 });
