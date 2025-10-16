@@ -643,25 +643,26 @@ app.post("/orders/:customerId", async (req, res) => {
     }
 
     if (
-      orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, "").length !== 16 ||
+      ![16,17,18,19].includes(orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, "").length) ||
       /\D/.test(orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, ""))
     ) {
       invalid("invalid card number");
       throw new Error("invalid card number");
     }
 
-    if (
-      (await db
-        .collection("userBankDetails")
-        .findOne({ cardNumber: orderDetails.bankDetails.cardNumber })) !==
-      (await db.collection("userBankDetails").findOne({ customerId }))
+    const isCardNoExist = await db
+        .collection("usersBankDetails")
+        .find({ cardNumber: orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, "") }).toArray();
+
+        if (
+     isCardNoExist.length === 1 && isCardNoExist[0].userId !== customerId
     ) {
       invalid("bank details already exists");
       throw new Error("bank details already exists");
     }
 
     if (
-      orderDetails.bankDetails.cvv.length !== 4 ||
+      ![3,4].includes(orderDetails.bankDetails.cvv.length) ||
       /\D/.test(orderDetails.bankDetails.cvv)
     ) {
       invalid("Invalid CVV number");
