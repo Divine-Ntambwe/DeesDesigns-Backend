@@ -14,6 +14,7 @@ const crypto = require("crypto");
 const { error } = require("console");
 const aws = require("aws-sdk");
 const { access } = require("fs");
+const frontEndLink = process.env.FrontEndLink
 app.use(express.json());
 app.use(cors());
 
@@ -394,7 +395,7 @@ app.get("/confirmCartRequest", async (req, res) => {
                 align-items:center;justify-content:center;font-family:raleway">
       <h1 style="font-size:4.5rem;">Email Confirmed!</h1>
      
-       <p style="margin-top:10px;font-size:4.5rem;">You can now view product in your cart <a href="http://www.deesdesigns.co.za.s3-website-us-east-1.amazonaws.com/Home">Home</a>.</p>
+       <p style="margin-top:10px;font-size:4.5rem;">You can now view product in your cart <a href="${frontEndLink}/Home">Home</a>.</p>
        
     </div>
   `);
@@ -845,7 +846,7 @@ app.post("/orders/:customerId", async (req, res) => {
 
       <!-- Call to Action -->
       <div style="text-align: center; margin: 32px 0;">
-        <a href="http://localhost:5173/DesignersHome" 
+        <a href="${frontEndLink}/DesignersHome" 
            style="display: inline-block; background: #d07a7a; color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 1.05em; box-shadow: 0 3px 8px rgba(208, 122, 122, 0.3);">
           View Your Dashboard
         </a>
@@ -922,7 +923,7 @@ app.post("/orders/:customerId", async (req, res) => {
 </div>
       `
     })
-    console.log(orderDetails.customerDetails.email)
+ 
     
     await transporter.sendMail({
       from: "deesdesigns465@gmail.com",
@@ -958,7 +959,7 @@ app.post("/orders/:customerId", async (req, res) => {
         <strong style="font-size: 1.2em; color: #d07a7a;">${dateOfDelivery.toDateString()}</strong>
       </p>
 
-      <a href="http://localhost:5173/Orders?orderId=${orderResult.insertedId}" 
+      <a href="${frontEndLink}/Orders?orderId=${orderResult.insertedId}" 
          style="display: inline-block; background: #d07a7a; color: white; text-decoration: none; padding: 14px 28px; border-radius: 8px; font-weight: 600; font-size: 1.05em; text-align: center; box-shadow: 0 3px 8px rgba(208, 122, 122, 0.3);">
         Track Your Order
       </a>
