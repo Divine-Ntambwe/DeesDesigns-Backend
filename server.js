@@ -12,6 +12,8 @@ const { match } = require("assert");
 const nodemailer = require("nodemailer");
 const crypto = require("crypto");
 const { error } = require("console");
+const aws = require("aws-sdk");
+const { access } = require("fs");
 app.use(express.json());
 app.use(cors());
 
@@ -23,6 +25,35 @@ const storage = multer.diskStorage({
     cb(null, uuidv4() + file.originalname);
   },
 });
+
+
+//AWS S3 BUCKET SET UP
+const region = "us-east-1"
+const bucketName = "dees-designs-uploads"
+const accessKeyId = process.env.AWS_ACCESS_KEY;
+const secretAccessKey = process.env.AWS_SECRET_KEY
+
+const s3 = new aws.S3({
+  region,
+  accessKeyId,
+  secretAccessKey,
+  signatureVersion:"v4"
+
+})
+
+async function generateUploadURL(){
+const imageName = crypto.randomBytes(15).toString("hex");
+
+const params =({
+  Bucket: bucketName,
+  Key: imageName,
+  Expires: 60
+})
+
+const uploadURL = await s3.getSignedUrlPromise('putObject',params);
+return uploadURL
+}
+
 
 const upload = multer({ storage });
 app.use("/uploads", express.static("uploads"));
@@ -162,7 +193,7 @@ app.post("/customersSignUp", async (req, res) => {
 });
 
 //posting sign up details to designers collection if user is a designer
-app.post("/designersSignUp", upload.single("pfp"), async (req, res) => {
+app.post("/designersSignUp", async (req, res) => {
   let status = 500;
   let message = "Internal server error";
   try {
@@ -170,8 +201,8 @@ app.post("/designersSignUp", upload.single("pfp"), async (req, res) => {
       status = 401;
       message = m;
     };
-
-    let userDetails = JSON.parse(req.body.details);
+    console.log(req.body)
+    let userDetails = req.body;
 
     const designersCol = db.collection("designers");
 
@@ -223,7 +254,7 @@ app.post("/designersSignUp", upload.single("pfp"), async (req, res) => {
     userDetails.password = base64.encode(userDetails.password);
 
     delete userDetails.confirmPassword;
-    const pfpPath = req.file.path;
+    const pfpPath = userDetails.pfpPath;
 
     const newUser = await designersCol.insertOne({
       ...userDetails,
@@ -246,6 +277,11 @@ app.post("/designersSignUp", upload.single("pfp"), async (req, res) => {
     res.status(status).json({ error: message });
   }
 });
+
+app.get("/s3Url", async (req,res)=>{
+  const url = await generateUploadURL();
+  res.json({url});
+})
 
 app.post("/userLogin", async (req, res) => {
   let status = 500;
@@ -478,7 +514,7 @@ app.post("/addToCart", async (req, res) => {
     if (product) {
       await cartCol.updateOne(
         { productId: cartItem.productId, size: cartItem.size },
-        { $inc: { quantity: 1 } }
+        { $inc: { quantity: cartItem.quantity } }
       );
     } else {
       await cartCol.insertOne(cartItem);
@@ -495,12 +531,18 @@ app.post("/addToCart", async (req, res) => {
 app.delete("/removeCartItem/:cartId", async (req, res) => {
   try {
     const cartId = req.params.cartId;
-    await db
+    const result = await db
       .collection("cart")
       .deleteOne({ _id: new mongodb.ObjectId(cartId) });
-    res.status(200).json({ message: "successfully deleted" });
+      console.log(result) 
+      if (result.deletedCount){
+        res.status(200).json(result);
+      } else {
+        throw new Error("could not delete")
+      }
+
   } catch (error) {
-    console.error("Error deleting from cart:", error);
+    console.error("Error deleting from cart: ", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
@@ -642,51 +684,54 @@ app.post("/orders/:customerId", async (req, res) => {
         .insertOne({ customerId, ...orderDetails.address });
     }
 
-    if (
-      ![16,17,18,19].includes(orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, "").length) ||
-      /\D/.test(orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, ""))
-    ) {
-      invalid("invalid card number");
-      throw new Error("invalid card number");
-    }
-
-    const isCardNoExist = await db
+    if (orderDetails.bankDetails){  
+      if ( 
+        ![16,17,18,19].includes(orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, "").length) ||
+        /\D/.test(orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, ""))
+      ) {
+        invalid("invalid card number");
+        throw new Error("invalid card number");
+      }
+  
+      const isCardNoExist = await db
+          .collection("usersBankDetails")
+          .find({ cardNumber: orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, "") }).toArray();
+  
+          if (
+       isCardNoExist.length === 1 && isCardNoExist[0].userId !== customerId
+      ) {
+        invalid("bank details already exists");
+        throw new Error("bank details already exists");
+      }
+  
+      if (
+        ![3,4].includes(orderDetails.bankDetails.cvv.length) ||
+        /\D/.test(orderDetails.bankDetails.cvv)
+      ) {
+        invalid("Invalid CVV number");
+        throw new Error("Invalid CVV number");
+      }
+      const expDate = new Date(orderDetails.bankDetails.expiryDate);
+  
+      if (expDate < new Date()) {
+        invalid("Credit card is already expired");
+        throw new Error("Credit card is already expired");
+      }
+  
+      const bankDetails = await db
         .collection("usersBankDetails")
-        .find({ cardNumber: orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, "") }).toArray();
-
-        if (
-     isCardNoExist.length === 1 && isCardNoExist[0].userId !== customerId
-    ) {
-      invalid("bank details already exists");
-      throw new Error("bank details already exists");
+        .updateOne(
+          { userId: customerId },
+          { $set: { ...orderDetails.bankDetails } }
+        );
+  
+      if (!bankDetails.matchedCount) {
+        await db
+          .collection("usersBankDetails")
+          .insertOne({ userId: customerId, ...orderDetails.bankDetails });
+      }
     }
 
-    if (
-      ![3,4].includes(orderDetails.bankDetails.cvv.length) ||
-      /\D/.test(orderDetails.bankDetails.cvv)
-    ) {
-      invalid("Invalid CVV number");
-      throw new Error("Invalid CVV number");
-    }
-    const expDate = new Date(orderDetails.bankDetails.expiryDate);
-
-    if (expDate < new Date()) {
-      invalid("Credit card is already expired");
-      throw new Error("Credit card is already expired");
-    }
-
-    const bankDetails = await db
-      .collection("usersBankDetails")
-      .updateOne(
-        { userId: customerId },
-        { $set: { ...orderDetails.bankDetails } }
-      );
-
-    if (!bankDetails.matchedCount) {
-      await db
-        .collection("usersBankDetails")
-        .insertOne({ userId: customerId, ...orderDetails.bankDetails });
-    }
 
     const productDetails = orderDetails.purchasedProducts;
 
@@ -705,8 +750,7 @@ app.post("/orders/:customerId", async (req, res) => {
           ? await db
               .collection("designersProducts")
               .findOne(
-                { _id: new mongodb.ObjectId(i.productId) },
-                { projection: { name: 1, price: 1, itemsInStock: 1, _id: 0 } }
+                { _id: new mongodb.ObjectId(i.productId) }
               )
           : {};
       if (i.productProvider === "designer") break;
@@ -730,20 +774,102 @@ app.post("/orders/:customerId", async (req, res) => {
         );
       }
 
-      if (i.productProvider === "stock") {
+      if (i.productProvider === "stockProduct") {
         await db
           .collection("stockProducts")
           .updateOne(
             { _id: new mongodb.ObjectId(i.productId) },
             { $set: { itemsInStock: product.itemsInStock } }
           );
-      } else {
+      } else if (i.productProvider === "designerProduct") {
         await db
           .collection("designersProducts")
           .updateOne(
             { _id: new mongodb.ObjectId(i.productId) },
             { $set: { onSale: false } }
           );
+
+          await transporter.sendMail({
+            from: "deesdesigns465@gmail.com",
+            to: product.designerEmail,
+            subject: "Your product has been purchased",
+            html:`
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f9f5f5; margin: 0; padding: 20px;">
+  <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.05);">
+
+    <!-- Header -->
+    <div style="background: linear-gradient(135deg, #d07a7a, #e8b4b4); color: white; padding: 32px 24px; text-align: center;">
+      <h1 style="margin: 0; font-family: 'Playwrite US Modern', cursive; font-size: 2.4em; font-weight: 400; letter-spacing: 0.5px;">
+        Dees Designs
+      </h1>
+      <p style="margin: 12px 0 0; font-size: 1.1em; opacity: 0.95;">Celebrating your creativity</p>
+    </div>
+
+    <!-- Main Content -->
+    <div style="padding: 32px 28px; color: #333;">
+
+      <!-- Greeting -->
+      <p style="font-size: 1.25em; margin: 0 0 16px; color: #444;">
+        Hi <strong>${product.uploadedBy}</strong>,
+      </p>
+
+      <!-- Success Message -->
+      <p style="margin: 0 0 20px; font-size: 1.05em; line-height: 1.7;">
+        <strong style="color: #d07a7a; font-size: 1.1em;">Congratulations!</strong><br>
+        Your design, <strong style="color: #d07a7a;">“${product.name}”</strong>, has been purchased!
+      </p>
+
+      <!-- Product Image -->
+      <div style="text-align: center; margin: 24px 0;">
+        <img 
+          src="${product.imagePath}" 
+          alt="${product.name}" 
+          width="100%" 
+          style="max-width: 380px; height: auto; border-radius: 12px; box-shadow: 0 6px 16px rgba(0,0,0,0.1); display: block; margin: 0 auto; border: 1px solid #eee;"
+        />
+      </div>
+
+      <!-- Delivery & Payout Info -->
+      <p style="margin: 24px 0 20px; font-size: 1.05em; line-height: 1.7; text-align: center;">
+        The order is confirmed and will be delivered via our trusted partners.<br>
+        <strong>Your stipend will be sent within 2–3 business days.</strong>
+      </p>
+
+      <!-- Highlight Box -->
+      <div style="background: #fdf6f6; border-left: 5px solid #d07a7a; padding: 18px; border-radius: 0 8px 8px 0; margin: 24px 0; font-size: 0.95em; line-height: 1.8; color: #444;">
+        <p style="margin: 0; font-weight: 600; color: #d07a7a;">Your Creativity Shines</p>
+        <p style="margin: 8px 0 0;">
+          Every sale supports independent designers like you. Keep creating — your next masterpiece could be someone’s treasure!
+        </p>
+      </div>
+
+      <!-- Call to Action -->
+      <div style="text-align: center; margin: 32px 0;">
+        <a href="http://localhost:5173/DesignersHome" 
+           style="display: inline-block; background: #d07a7a; color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 1.05em; box-shadow: 0 3px 8px rgba(208, 122, 122, 0.3);">
+          View Your Dashboard
+        </a>
+      </div>
+
+      <!-- Closing -->
+      <p style="margin: 32px 0 0; font-size: 1em; color: #666; line-height: 1.7; text-align: center;">
+        With gratitude,<br>
+        <strong style="color: #d07a7a;">The Dees Designs Team</strong>
+      </p>
+    </div>
+
+    <!-- Footer -->
+    <div style="background: #f4ecec; padding: 20px; text-align: center; font-size: 0.85em; color: #888;">
+      <p style="margin: 0;">
+        © 2025 Dees Designs. All rights reserved.<br>
+        Empowering designers, one creation at a time
+      </p>
+    </div>
+  </div>
+</div>
+            `
+          })
+
       }
     }
     const dateOfDelivery = new Date(
@@ -765,8 +891,131 @@ app.post("/orders/:customerId", async (req, res) => {
     if (!deletedResult.deletedCount) {
       throw new Error("couldn't delete");
     }
+    console.log(orderResult)
+    let productDetailsHtml = ""; 
+    orderDetails.purchasedProducts.map((item)=>{
+      productDetailsHtml += `
+      <div
+  key={item["_id"]}
+  style="display:flex;gap:10px;margin:15px 0;align-items:flex-start;"
+>
+  <img
+    src=${item.imgPath}
+    alt={A picture of ${item.productName}}
+    style="width:8vw;height:24vh;object-fit:cover;display:block;margin-right:10px"
+  />
 
-    res.status(200).json(orderResult);
+  <div style="display:grid;template-grid-columns:100%;">
+    <h4 style="margin:0;font-size:1.3em;font-weight:600;color:#000;">
+      ${item.productName}
+    </h4>
+    <p style="margin:0;font-size:1.2em;color:#000;">
+      R${item.price}.00
+    </p>
+    <p style="margin:0;font-size:1.2em;color:#000;">
+      Size: ${item.size}
+    </p>
+    <p style="margin:0;font-size:1.2em;color:#000;">
+      Qty: ${item.quantity}
+    </p>
+  </div>
+</div>
+      `
+    })
+    console.log(orderDetails.customerDetails.email)
+    
+    await transporter.sendMail({
+      from: "deesdesigns465@gmail.com",
+      to: orderDetails.customerDetails.email,
+      subject: "Order Summary",
+      html: `
+      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f9f5f5; margin: 0; padding: 20px;">
+  <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.05);">
+
+    <!-- Header -->
+    <div style="background: linear-gradient(135deg, #d07a7a, #e8b4b4); color: white; padding: 32px 24px; text-align: center;">
+      <h1 style="margin: 0; font-family: 'Playwrite US Modern', cursive; font-size: 2.4em; font-weight: 400; letter-spacing: 0.5px;">
+        Dees Designs
+      </h1>
+      <p style="margin: 12px 0 0; font-size: 1.1em; opacity: 0.95;">Get DEE best for you!</p>
+    </div>
+
+    <!-- Main Content -->
+    <div style="padding: 32px 28px; color: #333;">
+
+      <!-- Greeting -->
+      <p style="font-size: 1.25em; margin: 0 0 16px; color: #444;">
+        Hi <strong>${orderDetails.customerDetails.fullName}</strong>,
+      </p>
+      <p style="margin: 0 0 20px; font-size: 1.05em; line-height: 1.7;">
+        Thank you for shopping with <strong>Dees Designs</strong>! We're thrilled to confirm your order and are preparing it with care.
+      </p>
+
+      <!-- Delivery Info + Track Button -->
+      <p style="margin: 0 0 24px; font-size: 1.05em; line-height: 1.7;">
+        Your order is confirmed and expected to arrive by:
+        <br>
+        <strong style="font-size: 1.2em; color: #d07a7a;">${dateOfDelivery.toDateString()}</strong>
+      </p>
+
+      <a href="http://localhost:5173/Orders?orderId=${orderResult.insertedId}" 
+         style="display: inline-block; background: #d07a7a; color: white; text-decoration: none; padding: 14px 28px; border-radius: 8px; font-weight: 600; font-size: 1.05em; text-align: center; box-shadow: 0 3px 8px rgba(208, 122, 122, 0.3);">
+        Track Your Order
+      </a>
+
+      <!-- Order Details Section -->
+      <h2 style="font-family: 'Playwrite US Modern', cursive; font-size: 2em; color: #d07a7a; margin: 40px 0 16px; padding-bottom: 8px; border-bottom: 2px solid #fad4d4; display: inline-block;">
+        Order Details
+      </h2>
+
+      <div style="background: #fdf6f6; padding: 18px; border-radius: 10px; font-size: 0.95em; line-height: 1.8; color: #444;">
+        <p style="margin: 0 0 12px;"><strong>Order ID:</strong> <span style="color: #d07a7a; font-family: monospace;font-size:1em">${orderResult.insertedId}</span></p>
+        <p style="margin: 0;"><strong>Delivery Address:</strong></p>
+        <address style="margin: 8px 0 0; font-style: normal; color: #555; line-height: 1.7;">
+          ${orderDetails.address.streetAddress}<br>
+          ${orderDetails.address.suburb}, ${orderDetails.address.postalCode}<br>
+          ${orderDetails.address.city}, South Africa
+        </address>
+      </div>
+
+      <!-- Order Summary -->
+      <h2 style="font-family: 'Playwrite US Modern', cursive; font-size: 2em; color: #d07a7a; margin: 40px 0 16px; padding-bottom: 8px; border-bottom: 2px solid #fad4d4; display: inline-block;">
+        Order Summary
+      </h2>
+
+      <div style="overflow-y: auto; max-height: 450px; padding: 8px; border: 1px solid #f0e0e0; border-radius: 8px; background: #fafafa;">
+        ${productDetailsHtml}
+      </div>
+
+      <!-- Total -->
+      <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #eee;">
+        <p style="display: flex; justify-content: space-between; align-items: center; font-size: 1.35em; font-weight: 600; margin: 0; color: #000;">
+          <span>Total (incl. shipping):</span>
+          <span style="color: #d07a7a;">R${orderDetails.totalAmount}</span>
+        </p>
+      </div>
+
+      <!-- Closing -->
+      <p style="margin: 32px 0 0; font-size: 1em; color: #666; line-height: 1.7;">
+        Warm regards,<br>
+        <strong style="color: #d07a7a;">The Dees Designs Team</strong>
+      </p>
+    </div>
+
+    <!-- Footer -->
+    <div style="background: #f4ecec; padding: 20px; text-align: center; font-size: 0.85em; color: #888;">
+      <p style="margin: 0;">
+        © 2025 Dees Designs. All rights reserved.<br>
+        Handmade in South Africa with care and creativity
+      </p>
+    </div>
+  </div>
+</div>
+
+      `
+    })
+
+    res.status(200).json({orderResult});
   } catch (error) {
     console.error("error creating order:", error);
     res.status(status).json({ error: message });
@@ -954,19 +1203,20 @@ app.get("/designersProducts/:designerId", async (req, res) => {
 //creating a new designer product
 app.post(
   "/uploadDesignersProduct/:designerId",
-  upload.single("productImage"),
   async (req, res) => {
     try {
-      const newItem = JSON.parse(req.body.details);
+      const newItem = req.body;
       const desId = req.params.designerId;
 
+      if (!newItem){
+        throw new Error("No item details")
+      }
       const designersCol = db.collection("designersProducts");
-      const productImgPath = req.file.path;
+    
 
       const result = {
         designerId: desId,
         ...newItem,
-        imagePath: productImgPath,
         onSale: true,
       };
 
@@ -996,15 +1246,10 @@ app.delete("/removeDesignersProducts/:designerProductId", async (req, res) => {
 //updating details for a specific designer products
 app.put(
   "/editDesignerProductDetails/:designerProductId",
-  upload.single("productImage"),
   async (req, res) => {
     try {
       const desProdId = req.params.designerProductId;
-      const updates = JSON.parse(req.body.details);
-
-      if (req.file) {
-        updates.imagePath = req.file.path;
-      }
+      const updates =req.body
 
       const result = await db
         .collection("designersProducts")
@@ -1054,14 +1299,14 @@ app.get("/designersContactInfo", async (req, res) => {
   }
 });
 
-app.put("/editDesignerInfo/:designerId", upload.single("desNewPfp"), async (req, res) => {
+app.put("/editDesignerInfo/:designerId", async (req, res) => {
   try {
     const id = req.params.designerId;
-    const {phoneNumber} = JSON.parse(req.body.details);
-    const result = req.file? await db.collection("designers").updateOne({_id: new mongodb.ObjectId(id)},{$set:{phoneNumber,pfpPath: req.file.path}}):
-    await db.collection("designers").updateOne({_id: new mongodb.ObjectId(id)},{$set:{phoneNumber}});
+    const {phoneNumber,pfpPath} = req.body;
+    const result = await db.collection("designers").updateOne({_id: new mongodb.ObjectId(id)},{$set:{phoneNumber,pfpPath}});
+
    
-   req.file && result? res.status(200).json({pfpPath:req.file.path}): !req.file && result?res.status(200).json({message:"successful"}):res.status(400).json({error:"could not update profile, user not found"})
+ result?res.status(200).json({message:"successful"}):res.status(400).json({error:"could not update profile, user not found"})
   } catch (error) {
     console.error("error updating profile", error);
     res.status(500).json({ message: "internal server error" });
@@ -1070,7 +1315,6 @@ app.put("/editDesignerInfo/:designerId", upload.single("desNewPfp"), async (req,
 
 app.post(
   "/SendDesignToCustomer/:designerId",
-  upload.single("custProductImage"),
   async (req, res) => {
     let status = 500;
     let message = "Internal server error";
@@ -1082,9 +1326,9 @@ app.post(
       };
       const designerId = req.params.designerId;
 
-      const { customerEmail, name, uploadedBy, imgPath } = JSON.parse(
-        req.body.details
-      );
+      const { customerEmail, name, uploadedBy,imagePath} =
+        req.body
+      ; 
 
       const customer = await db
         .collection("customers")
@@ -1100,12 +1344,81 @@ app.post(
       const link = `http://${process.env.ElasticIP}:5000/confirmCartRequest?token=${token}`;
 
       await transporter.sendMail({
-        from: "becalisjohnson@gmail.com",
+        from: "deesdesigns465@gmail.com",
         to: customerEmail,
         subject: "Confirm Designer Product Request",
-        html: `<p>The Designer ${uploadedBy} has sent a request for you to add the product ${name} to your cart  <a href="${link}">Click here to confirm</a></p> 
-      <br>
-      <p>If you did not request this product simply ignore this email<p>
+        html: `
+       <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f9f5f5; margin: 0; padding: 20px;">
+  <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.05);">
+
+    <!-- Header -->
+    <div style="background: linear-gradient(135deg, #d07a7a, #e8b4b4); color: white; padding: 32px 24px; text-align: center;">
+      <h1 style="margin: 0; font-family: 'Playwrite US Modern', cursive; font-size: 2.4em; font-weight: 400; letter-spacing: 0.5px;">
+        Dees Designs
+      </h1>
+      <p style="margin: 12px 0 0; font-size: 1.1em; opacity: 0.95;">Get DEE best for you!</p>
+    </div>
+
+    <!-- Main Content -->
+    <div style="padding: 32px 28px; color: #333; text-align: center;">
+
+      <!-- Greeting -->
+      <p style="font-size: 1.25em; margin: 0 0 16px; color: #444;">
+        Hi <strong>${customer.name}</strong>,
+      </p>
+
+      <!-- Designer Request Message -->
+      <p style="margin: 0 0 20px; font-size: 1.05em; line-height: 1.7;">
+        Designer <strong style="color: #d07a7a;">${uploadedBy}</strong> has sent you a special request!
+      </p>
+
+      <!-- Product Image -->
+      <div style="margin: 24px 0;">
+        <img 
+          src="${imagePath}" 
+          alt="${name}" 
+          width="100%" 
+          style="max-width: 420px; height: auto; border-radius: 12px; box-shadow: 0 6px 16px rgba(0,0,0,0.1); display: block; margin: 0 auto; border: 1px solid #eee;"
+        />
+      </div>
+
+      <!-- Product Name & Action -->
+      <p style="margin: 20px 0 8px; font-size: 1.15em; font-weight: 600; color: #333;">
+        "${name}"
+      </p>
+
+      <p style="margin: 0 0 28px; font-size: 1.05em; line-height: 1.7; color: #555;">
+        They’d love for you to add this unique piece to your cart.
+      </p>
+
+      <!-- CTA Button -->
+      <a href="${link}" 
+         style="display: inline-block; background: #d07a7a; color: white; text-decoration: none; padding: 15px 36px; border-radius: 8px; font-weight: 600; font-size: 1.1em; box-shadow: 0 4px 10px rgba(208, 122, 122, 0.3);">
+        Add to Cart
+      </a>
+
+      <!-- Safety Note -->
+      <p style="margin: 32px 0 0; font-size: 0.9em; color: #888; line-height: 1.6;">
+        If you didn’t expect this request, you can safely ignore this email.<br>
+        No action is required.
+      </p>
+
+      <!-- Closing -->
+      <p style="margin: 32px 0 0; font-size: 1em; color: #666; line-height: 1.7;">
+        Warm regards,<br>
+        <strong style="color: #d07a7a;">The Dees Designs Team</strong>
+      </p>
+    </div>
+
+    <!-- Footer -->
+    <div style="background: #f4ecec; padding: 20px; text-align: center; font-size: 0.85em; color: #888;">
+      <p style="margin: 0;">
+        © 2025 Dees Designs. All rights reserved.<br>
+        Handmade in South Africa with care and creativity
+      </p>
+    </div>
+  </div>
+</div>
       `,
       });
 
@@ -1114,8 +1427,7 @@ app.post(
         .insertOne({
           designerId,
           customerId: customer._id.toString(),
-          ...JSON.parse(req.body.details),
-          imagePath: req.file.path,
+          ...req.body,
           size: "M",
           quantity: 1,
           expiresAt,
