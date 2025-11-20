@@ -14,7 +14,7 @@ const crypto = require("crypto");
 const { error } = require("console");
 const aws = require("aws-sdk");
 const { access } = require("fs");
-const frontEndLink = process.env.FrontEndLink
+const frontEndLink = process.env.FrontEndLink;
 app.use(express.json());
 app.use(cors());
 
@@ -27,34 +27,31 @@ const storage = multer.diskStorage({
   },
 });
 
-
 //AWS S3 BUCKET SET UP
-const region = "us-east-1"
-const bucketName = "dees-designs-uploads"
+const region = "us-east-1";
+const bucketName = "dees-designs-uploads";
 const accessKeyId = process.env.AWS_ACCESS_KEY;
-const secretAccessKey = process.env.AWS_SECRET_KEY
+const secretAccessKey = process.env.AWS_SECRET_KEY;
 
 const s3 = new aws.S3({
   region,
   accessKeyId,
   secretAccessKey,
-  signatureVersion:"v4"
+  signatureVersion: "v4",
+});
 
-})
+async function generateUploadURL() {
+  const imageName = crypto.randomBytes(15).toString("hex");
 
-async function generateUploadURL(){
-const imageName = crypto.randomBytes(15).toString("hex");
+  const params = {
+    Bucket: bucketName,
+    Key: imageName,
+    Expires: 60,
+  };
 
-const params =({
-  Bucket: bucketName,
-  Key: imageName,
-  Expires: 60
-})
-
-const uploadURL = await s3.getSignedUrlPromise('putObject',params);
-return uploadURL
+  const uploadURL = await s3.getSignedUrlPromise("putObject", params);
+  return uploadURL;
 }
-
 
 const upload = multer({ storage });
 app.use("/uploads", express.static("uploads"));
@@ -83,7 +80,7 @@ async function connectToMongo() {
   await client.connect();
   db = client.db("DeesDesigns");
   console.log("connected to mongodb");
-} 
+}
 
 async function basicAuth(req, res, next) {
   const authHeader = req.headers.authorization; //gets authorization method if there is any(-H'Authorization:'<auth methods>...)
@@ -100,7 +97,6 @@ async function basicAuth(req, res, next) {
   const credentials = base64.decode(base64Credentials).split(":");
   const email = credentials[0];
   const password = credentials[1];
-  
 
   //checking if email exists and password is correct
   const customersCol = db.collection("customers");
@@ -174,19 +170,84 @@ app.post("/customersSignUp", async (req, res) => {
       throw new Error("Passwords do not match");
     }
 
+    await transporter.sendMail({
+      from:"deesdesigns465@gmail.com",
+      to:userDetails.email,
+      subject: "Welcome to Dees Designs!",
+      html:`<div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f9f5f5; margin: 0; padding: 20px;">
+  <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.05);">
+
+    <!-- Header -->
+    <div style="background: linear-gradient(135deg, #d07a7a, #e8b4b4); color: white; padding: 40px 24px; text-align: center;">
+      <h1 style="margin: 0; font-family: 'Playwrite US Modern', cursive; font-size: 2.6em; font-weight: 400; letter-spacing: 1px;">
+        Welcome to Dees Designs!
+      </h1>
+      <p style="margin: 16px 0 0; font-size: 1.2em; opacity: 0.95;">
+      Get DEE best for you ♡
+      </p>
+    </div>
+
+    <!-- Main Content -->
+    <div style="padding: 36px 32px; color: #333; text-align: center;">
+
+      <!-- Celebration Image / Icon -->
+      
+
+      <!-- Welcome Message -->
+      <h2 style="font-size: 1.6em; margin: 24px 0 12px; color: #444;">
+        Hi <strong>${userDetails.name || 'there'}</strong>,
+      </h2>
+
+      <p style="font-size: 1.15em; line-height: 1.8; color: #555; margin: 0 0 20px;">
+        Your account has been <strong style="color: #d07a7a;">successfully created</strong> — welcome to the Dees Designs family!
+      </p>
+
+      <p style="font-size: 1.05em; line-height: 1.8; color: #666; margin: 0 0 32px;">
+        You’re now part of a beautiful community that celebrates handmade treasures, unique designs, and South African creativity. 
+        Get ready to discover one-of-a-kind pieces made just for you.
+      </p>
+
+      <!-- CTA Button -->
+      <a href="${frontEndLink}/Home" 
+         style="display: inline-block; background: #d07a7a; color: white; text-decoration: none; padding: 16px 40px; border-radius: 8px; font-weight: 600; font-size: 1.1em; box-shadow: 0 4px 12px rgba(208,122,122,0.3);">
+        Start Shopping
+      </a>
+
+      <!-- Extra Touch -->
+      <p style="margin: 32px 0 8px; font-size: 0.95em; color: #888;">
+        Have questions? We’re here for you.<br>
+        Reply to this email or reach us at right here</a>
+      </p>
+
+      <!-- Closing -->
+      <p style="margin: 40px 0 0; font-size: 1.05em; color: #666; line-height: 1.7;">
+        So much love,<br>
+        <strong style="color: #d07a7a;">The Dees Designs Team</strong>
+      </p>
+    </div>
+
+    <!-- Footer -->
+    <div style="background: #f4ecec; padding: 24px; text-align: center; font-size: 0.85em; color: #888;">
+      <p style="margin: 0;">
+        © 2025 Dees Designs ♡ Handmade in South Africa<br>
+        Unique. Personal. Yours.
+      </p>
+    </div>
+  </div>
+</div>`
+    });
+
     userDetails.password = base64.encode(userDetails.password);
 
     delete userDetails.confirmPassword;
     const newUser = await customersCol.insertOne({
       ...userDetails,
     });
-    res
-      .status(200)
-      .json({
-        message: "Successfully signed up",
-        _id: newUser.insertedId,
-        ...userDetails,
-      });
+    res.status(200).json({
+      message: "Successfully signed up",
+      _id: newUser.insertedId,
+      ...userDetails,
+    });
   } catch (error) {
     console.error("Error signining customer up: ", error);
     res.status(status).json({ error: message });
@@ -202,7 +263,7 @@ app.post("/designersSignUp", async (req, res) => {
       status = 401;
       message = m;
     };
-    console.log(req.body)
+    console.log(req.body);
     let userDetails = req.body;
 
     const designersCol = db.collection("designers");
@@ -252,6 +313,73 @@ app.post("/designersSignUp", async (req, res) => {
       throw new Error("Phone number is invalid");
     }
 
+    await transporter.sendMail({
+      from:"deesdesigns465@gmail.com",
+      to:userDetails.email,
+      subject: "Welcome to Dees Designs!",
+      html:`<div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f9f5f5; margin: 0; padding: 20px;">
+  <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.05);">
+
+    <!-- Header -->
+    <div style="background: linear-gradient(135deg, #d07a7a, #e8b4b4); color: white; padding: 40px 24px; text-align: center;">
+      <h1 style="margin: 0; font-family: 'Playwrite US Modern', cursive; font-size: 2.6em; font-weight: 400; letter-spacing: 1px;">
+        Welcome to Dees Designs!
+      </h1>
+      <p style="margin: 16px 0 0; font-size: 1.2em; opacity: 0.95;">
+      Handled With Care ♡
+      </p>
+    </div>
+
+    <!-- Main Content -->
+    <div style="padding: 36px 32px; color: #333; text-align: center;">
+
+      <!-- Celebration Image / Icon -->
+      
+
+      <!-- Welcome Message -->
+      <h2 style="font-size: 1.6em; margin: 24px 0 12px; color: #444;">
+        Hi <strong>${userDetails.name || 'there'}</strong>,
+      </h2>
+
+      <p style="font-size: 1.15em; line-height: 1.8; color: #555; margin: 0 0 20px;">
+        Your account as a designer has been <strong style="color: #d07a7a;">successfully created</strong> — welcome to the Dees Designs family!
+      </p>
+
+      <p style="font-size: 1.05em; line-height: 1.8; color: #666; margin: 0 0 32px;">
+        You’re now part of a beautiful community that celebrates handmade treasures, unique designs, and South African creativity. 
+        Get ready to upload your one-of-a-kind pieces for people around you!
+      </p>
+
+      <!-- CTA Button -->
+      <a href="${frontEndLink}/DesignersHome" 
+         style="display: inline-block; background: #d07a7a; color: white; text-decoration: none; padding: 16px 40px; border-radius: 8px; font-weight: 600; font-size: 1.1em; box-shadow: 0 4px 12px rgba(208,122,122,0.3);">
+        Start Uploading
+      </a>
+
+      <!-- Extra Touch -->
+      <p style="margin: 32px 0 8px; font-size: 0.95em; color: #888;">
+        Have questions? We’re here for you.<br>
+        Reply to this email or reach us right here</a>
+      </p>
+
+      <!-- Closing -->
+      <p style="margin: 40px 0 0; font-size: 1.05em; color: #666; line-height: 1.7;">
+        So much love,<br>
+        <strong style="color: #d07a7a;">The Dees Designs Team</strong>
+      </p>
+    </div>
+
+    <!-- Footer -->
+    <div style="background: #f4ecec; padding: 24px; text-align: center; font-size: 0.85em; color: #888;">
+      <p style="margin: 0;">
+        © 2025 Dees Designs ♡ Handmade in South Africa<br>
+        Unique. Personal. Yours.
+      </p>
+    </div>
+  </div>
+</div>`
+    });
+
     userDetails.password = base64.encode(userDetails.password);
 
     delete userDetails.confirmPassword;
@@ -260,7 +388,7 @@ app.post("/designersSignUp", async (req, res) => {
     const newUser = await designersCol.insertOne({
       ...userDetails,
       pfpPath,
-      rating:[]
+      rating: [],
     });
     if (newUser) {
       res.status(200).json({
@@ -268,7 +396,7 @@ app.post("/designersSignUp", async (req, res) => {
         _id: newUser.insertedId,
         ...userDetails,
         pfpPath,
-        rating:[]
+        rating: [],
       });
     } else {
       throw new Error("Could not sign up");
@@ -279,10 +407,10 @@ app.post("/designersSignUp", async (req, res) => {
   }
 });
 
-app.get("/s3Url", async (req,res)=>{
+app.get("/s3Url", async (req, res) => {
   const url = await generateUploadURL();
-  res.json({url});
-})
+  res.json({ url });
+});
 
 app.post("/userLogin", async (req, res) => {
   let status = 500;
@@ -528,6 +656,21 @@ app.post("/addToCart", async (req, res) => {
   }
 });
 
+app.post("/addToLikes", async (req, res) => {
+  try {
+    const likedItem = req.body; //quantity,size
+
+    const likesCol = db.collection("likes");
+
+    await likesCol.insertOne(likedItem);
+
+    res.status(200).json(likedItem);
+  } catch (error) {
+    console.error("Error liking product: ", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 //deleting a cart item when a user removes an item from their cart
 app.delete("/removeCartItem/:cartId", async (req, res) => {
   try {
@@ -535,18 +678,35 @@ app.delete("/removeCartItem/:cartId", async (req, res) => {
     const result = await db
       .collection("cart")
       .deleteOne({ _id: new mongodb.ObjectId(cartId) });
-      console.log(result) 
-      if (result.deletedCount){
-        res.status(200).json(result);
-      } else {
-        throw new Error("could not delete")
-      }
-
+    console.log(result);
+    if (result.deletedCount) {
+      res.status(200).json(result);
+    } else {
+      throw new Error("could not delete");
+    }
   } catch (error) {
     console.error("Error deleting from cart: ", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
+
+app.delete("/removeLikedItem", async (req, res) => {
+  try {
+  
+    const productId = req.body.productId;
+    const result = await db
+      .collection("likes")
+      .deleteOne({productId});
+    if (result.deletedCount) {
+      res.status(200).json(result);
+    } else {
+      throw new Error("could not delete");
+    }
+  } catch (error) {
+    console.error("Error deleting from likes: ", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+}); 
 
 //getting all cart items in a specfic users cart
 app.get("/cart/:customerId", async (req, res) => {
@@ -559,6 +719,20 @@ app.get("/cart/:customerId", async (req, res) => {
     res.status(200).json(cartItems);
   } catch (error) {
     console.error("Error getting all cart items:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.get("/likes/:customerId", async (req, res) => {
+  try {
+    const custId = req.params.customerId;
+    const likedItems = await db
+      .collection("likes")
+      .find({ customerId: custId })
+      .toArray();
+    res.status(200).json(likedItems);
+  } catch (error) {
+    console.error("Error getting all liked items:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
@@ -582,22 +756,22 @@ app.get("/cart/:customerId", async (req, res) => {
 //   }
 // });
 
-// app.get("/getAddressAndBankDetails/:customerId", async (req, res) => {
-//   try {
-//     const customerId = req.params.customerId;
-//     const bankDetails = await db
-//       .collection("usersBankDetails")
-//       .findOne({ userId: customerId });
-//     const addressDetails = await db
-//       .collection("customersAddress")
-//       .findOne({ customerId });
+app.get("/getAddressAndBankDetails/:customerId", async (req, res) => {
+  try {
+    const customerId = req.params.customerId;
+    const bankDetails = await db
+      .collection("usersBankDetails")
+      .findOne({ userId: customerId });
+    const addressDetails = await db
+      .collection("customersAddress")
+      .findOne({ customerId });
 
-//     res.status(200).json({ ...bankDetails, ...addressDetails });
-//   } catch (error) {
-//     console.error("Error getting Address and Bank details:", error);
-//     res.status(500).json({ message: "Internal server error" });
-//   }
-// });
+    res.status(200).json({ ...bankDetails, ...addressDetails });
+  } catch (error) {
+    console.error("Error getting Address and Bank details:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
 
 // //posting new bank details
 // app.post("/usersBankDetails/:customerId", async (req, res) => {
@@ -685,54 +859,59 @@ app.post("/orders/:customerId", async (req, res) => {
         .insertOne({ customerId, ...orderDetails.address });
     }
 
-    if (orderDetails.bankDetails){  
-      if ( 
-        ![16,17,18,19].includes(orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, "").length) ||
+    if (orderDetails.bankDetails) {
+      if (
+        ![16, 17, 18, 19].includes(
+          orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, "").length
+        ) ||
         /\D/.test(orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, ""))
       ) {
         invalid("invalid card number");
         throw new Error("invalid card number");
       }
-  
+
       const isCardNoExist = await db
-          .collection("usersBankDetails")
-          .find({ cardNumber: orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, "") }).toArray();
-  
-          if (
-       isCardNoExist.length === 1 && isCardNoExist[0].userId !== customerId
+        .collection("usersBankDetails")
+        .find({
+          cardNumber: orderDetails.bankDetails.cardNumber.replaceAll(/\s/g, ""),
+        })
+        .toArray();
+
+      if (
+        isCardNoExist.length === 1 &&
+        isCardNoExist[0].userId !== customerId
       ) {
         invalid("bank details already exists");
         throw new Error("bank details already exists");
       }
-  
+
       if (
-        ![3,4].includes(orderDetails.bankDetails.cvv.length) ||
+        ![3, 4].includes(orderDetails.bankDetails.cvv.length) ||
         /\D/.test(orderDetails.bankDetails.cvv)
       ) {
         invalid("Invalid CVV number");
         throw new Error("Invalid CVV number");
       }
       const expDate = new Date(orderDetails.bankDetails.expiryDate);
-  
+
       if (expDate < new Date()) {
         invalid("Credit card is already expired");
         throw new Error("Credit card is already expired");
       }
-  
+
       const bankDetails = await db
         .collection("usersBankDetails")
         .updateOne(
           { userId: customerId },
           { $set: { ...orderDetails.bankDetails } }
         );
-  
+
       if (!bankDetails.matchedCount) {
         await db
           .collection("usersBankDetails")
           .insertOne({ userId: customerId, ...orderDetails.bankDetails });
       }
     }
-
 
     const productDetails = orderDetails.purchasedProducts;
 
@@ -750,9 +929,7 @@ app.post("/orders/:customerId", async (req, res) => {
           : i.productProvider === "designerProduct"
           ? await db
               .collection("designersProducts")
-              .findOne(
-                { _id: new mongodb.ObjectId(i.productId) }
-              )
+              .findOne({ _id: new mongodb.ObjectId(i.productId) })
           : {};
       if (i.productProvider === "designer") break;
       if (!product) {
@@ -767,7 +944,9 @@ app.post("/orders/:customerId", async (req, res) => {
       if (product.itemsInStock[i.size] < 0) {
         invalid(
           "The product " +
-            i.productName +
+            i.productName + 
+            " size "+
+            i.size+
             " is no longer available in the quantity you want"
         );
         throw new Error(
@@ -790,11 +969,11 @@ app.post("/orders/:customerId", async (req, res) => {
             { $set: { onSale: false } }
           );
 
-          await transporter.sendMail({
-            from: "deesdesigns465@gmail.com",
-            to: product.designerEmail,
-            subject: "Your product has been purchased",
-            html:`
+        await transporter.sendMail({
+          from: "deesdesigns465@gmail.com",
+          to: product.designerEmail,
+          subject: "Your product has been purchased",
+          html: `
             <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f9f5f5; margin: 0; padding: 20px;">
   <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.05);">
 
@@ -868,9 +1047,8 @@ app.post("/orders/:customerId", async (req, res) => {
     </div>
   </div>
 </div>
-            `
-          })
-
+            `,
+        });
       }
     }
     const dateOfDelivery = new Date(
@@ -892,9 +1070,9 @@ app.post("/orders/:customerId", async (req, res) => {
     if (!deletedResult.deletedCount) {
       throw new Error("couldn't delete");
     }
-    console.log(orderResult)
-    let productDetailsHtml = ""; 
-    orderDetails.purchasedProducts.map((item)=>{
+    console.log(orderResult);
+    let productDetailsHtml = "";
+    orderDetails.purchasedProducts.map((item) => {
       productDetailsHtml += `
       <div
   key={item["_id"]}
@@ -921,10 +1099,9 @@ app.post("/orders/:customerId", async (req, res) => {
     </p>
   </div>
 </div>
-      `
-    })
- 
-    
+      `;
+    });
+
     await transporter.sendMail({
       from: "deesdesigns465@gmail.com",
       to: orderDetails.customerDetails.email,
@@ -970,7 +1147,9 @@ app.post("/orders/:customerId", async (req, res) => {
       </h2>
 
       <div style="background: #fdf6f6; padding: 18px; border-radius: 10px; font-size: 0.95em; line-height: 1.8; color: #444;">
-        <p style="margin: 0 0 12px;"><strong>Order ID:</strong> <span style="color: #d07a7a; font-family: monospace;font-size:1em">${orderResult.insertedId}</span></p>
+        <p style="margin: 0 0 12px;"><strong>Order ID:</strong> <span style="color: #d07a7a; font-family: monospace;font-size:1em">${
+          orderResult.insertedId
+        }</span></p>
         <p style="margin: 0;"><strong>Delivery Address:</strong></p>
         <address style="margin: 8px 0 0; font-style: normal; color: #555; line-height: 1.7;">
           ${orderDetails.address.streetAddress}<br>
@@ -1013,10 +1192,10 @@ app.post("/orders/:customerId", async (req, res) => {
   </div>
 </div>
 
-      `
-    })
+      `,
+    });
 
-    res.status(200).json({orderResult});
+    res.status(200).json({ orderResult });
   } catch (error) {
     console.error("error creating order:", error);
     res.status(status).json({ error: message });
@@ -1083,9 +1262,7 @@ app.get("/customerOrders/:customerId", async (req, res) => {
 
       if (
         Date.parse(new Date()) >=
-          Date.parse(`1970/01/${daysInProcess + 3}`) +
-            Date.parse(order.dateOfPurchase) &&
-        new Date().toDateString() !== order.dateOfPurchase.toDateString()
+         order.dateOfDelivery
       ) {
         await db
           .collection("orders")
@@ -1202,33 +1379,29 @@ app.get("/designersProducts/:designerId", async (req, res) => {
 });
 
 //creating a new designer product
-app.post(
-  "/uploadDesignersProduct/:designerId",
-  async (req, res) => {
-    try {
-      const newItem = req.body;
-      const desId = req.params.designerId;
+app.post("/uploadDesignersProduct/:designerId", async (req, res) => {
+  try {
+    const newItem = req.body;
+    const desId = req.params.designerId;
 
-      if (!newItem){
-        throw new Error("No item details")
-      }
-      const designersCol = db.collection("designersProducts");
-    
-
-      const result = {
-        designerId: desId,
-        ...newItem,
-        onSale: true,
-      };
-
-      await designersCol.insertOne(result);
-      res.status(200).json({ message: "successfully uploaded" });
-    } catch (error) {
-      console.error("Error creating new design: ", error);
-      res.status(500).json({ error: "Internal server error" });
+    if (!newItem) {
+      throw new Error("No item details");
     }
+    const designersCol = db.collection("designersProducts");
+
+    const result = {
+      designerId: desId,
+      ...newItem,
+      onSale: true,
+    };
+
+    await designersCol.insertOne(result);
+    res.status(200).json({ message: "successfully uploaded" });
+  } catch (error) {
+    console.error("Error creating new design: ", error);
+    res.status(500).json({ error: "Internal server error" });
   }
-);
+});
 
 //removing a designer product when a designer wants to remove it
 app.delete("/removeDesignersProducts/:designerProductId", async (req, res) => {
@@ -1245,31 +1418,28 @@ app.delete("/removeDesignersProducts/:designerProductId", async (req, res) => {
 });
 
 //updating details for a specific designer products
-app.put(
-  "/editDesignerProductDetails/:designerProductId",
-  async (req, res) => {
-    try {
-      const desProdId = req.params.designerProductId;
-      const updates =req.body
+app.put("/editDesignerProductDetails/:designerProductId", async (req, res) => {
+  try {
+    const desProdId = req.params.designerProductId;
+    const updates = req.body;
 
-      const result = await db
-        .collection("designersProducts")
-        .updateOne(
-          { _id: new mongodb.ObjectId(desProdId) },
-          { $set: { ...updates } }
-        );
+    const result = await db
+      .collection("designersProducts")
+      .updateOne(
+        { _id: new mongodb.ObjectId(desProdId) },
+        { $set: { ...updates } }
+      );
 
-      if (result.matchedCount) {
-        res.status(200).json({ message: "successfully updated" });
-      } else {
-        throw new Error("could not update product");
-      }
-    } catch (error) {
-      console.error("error updating product", error);
-      res.status(500).json({ error: "internal server error" });
+    if (result.matchedCount) {
+      res.status(200).json({ message: "successfully updated" });
+    } else {
+      throw new Error("could not update product");
     }
+  } catch (error) {
+    console.error("error updating product", error);
+    res.status(500).json({ error: "internal server error" });
   }
-);
+});
 
 app.get("/designersContactInfo", async (req, res) => {
   try {
@@ -1290,11 +1460,11 @@ app.get("/designersContactInfo", async (req, res) => {
         }
       )
       .toArray();
-    if (!result){
-      res.status(400),json({message:"user not found"})
+    if (!result) {
+      res.status(400), json({ message: "user not found" });
     }
     res.status(200).json(result);
-  } catch (error) { 
+  } catch (error) {
     console.error("error getting designer's products", error);
     res.status(500).json({ message: "internal server error" });
   }
@@ -1303,52 +1473,55 @@ app.get("/designersContactInfo", async (req, res) => {
 app.put("/editDesignerInfo/:designerId", async (req, res) => {
   try {
     const id = req.params.designerId;
-    const {phoneNumber,pfpPath} = req.body;
-    const result = await db.collection("designers").updateOne({_id: new mongodb.ObjectId(id)},{$set:{phoneNumber,pfpPath}});
+    const { phoneNumber, pfpPath } = req.body;
+    const result = await db
+      .collection("designers")
+      .updateOne(
+        { _id: new mongodb.ObjectId(id) },
+        { $set: { phoneNumber, pfpPath } }
+      );
 
-   
- result?res.status(200).json({message:"successful"}):res.status(400).json({error:"could not update profile, user not found"})
+    result
+      ? res.status(200).json({ message: "successful" })
+      : res
+          .status(400)
+          .json({ error: "could not update profile, user not found" });
   } catch (error) {
     console.error("error updating profile", error);
     res.status(500).json({ message: "internal server error" });
   }
 });
 
-app.post(
-  "/SendDesignToCustomer/:designerId",
-  async (req, res) => {
-    let status = 500;
-    let message = "Internal server error";
+app.post("/SendDesignToCustomer/:designerId", async (req, res) => {
+  let status = 500;
+  let message = "Internal server error";
 
-    try {
-      const invalid = (m = "invalid input") => {
-        status = 401;
-        message = m;
-      };
-      const designerId = req.params.designerId;
+  try {
+    const invalid = (m = "invalid input") => {
+      status = 401;
+      message = m;
+    };
+    const designerId = req.params.designerId;
 
-      const { customerEmail, name, uploadedBy,imagePath} =
-        req.body
-      ; 
+    const { customerEmail, name, uploadedBy, imagePath } = req.body;
+    const customer = await db
+      .collection("customers")
+      .findOne({ email: customerEmail });
 
-      const customer = await db
-        .collection("customers")
-        .findOne({ email: customerEmail });
+    if (!customer) {
+      invalid("Customer not found");
+      throw new Error("customer not found");
+    }
 
-      if (!customer) {
-        invalid("Customer not found");
-        throw new Error("customer not found");
-      }
+    const token = crypto.randomBytes(20).toString("hex");
+    const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+    const link = `http://${process.env.ElasticIP}:5000/confirmCartRequest?token=${token}`;
 
-      const token = crypto.randomBytes(20).toString("hex");
-      const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
-      const link = `http://${process.env.ElasticIP}:5000/confirmCartRequest?token=${token}`;
-
-      await transporter.sendMail({
-        from: "deesdesigns465@gmail.com",
-        to: customerEmail,
-        subject: "Confirm Designer Product Request",
-        html: `
+    await transporter.sendMail({
+      from: "deesdesigns465@gmail.com",
+      to: customerEmail,
+      subject: "Confirm Designer Product Request",
+      html: `
        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f9f5f5; margin: 0; padding: 20px;">
   <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.05);">
 
@@ -1421,31 +1594,28 @@ app.post(
   </div>
 </div>
       `,
-      });
+    });
 
-      const cartRequest = await db
-        .collection("customerCartRequests")
-        .insertOne({
-          designerId,
-          customerId: customer._id.toString(),
-          ...req.body,
-          size: "M",
-          quantity: 1,
-          expiresAt,
-          token,
-        });
+    const cartRequest = await db.collection("customerCartRequests").insertOne({
+      designerId,
+      customerId: customer._id.toString(),
+      ...req.body,
+      size: "M",
+      quantity: 1,
+      expiresAt,
+      token,
+    });
 
-      res.status(200).send({ message: "succcessfully sent" });
-    } catch (error) {
-      console.error("Error sending email: ", error);
-      res.status(status).json({ error: message });
-    }
+    res.status(200).send({ message: "succcessfully sent" });
+  } catch (error) {
+    console.error("Error sending email: ", error);
+    res.status(status).json({ error: message });
   }
-);
+});
 
-
-
-app.listen(port, "0.0.0.0",async () => {
-  console.log(`The server has started on the link http://${process.env.ElasticIP}:${port}`);
+app.listen(port, "0.0.0.0", async () => {
+  console.log(
+    `The server has started on the link http://${process.env.ElasticIP}:${port}`
+  );
   await connectToMongo();
 });
