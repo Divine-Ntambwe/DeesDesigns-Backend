@@ -132,21 +132,13 @@ app.post("/customersSignUp", async (req, res) => {
     const customersCol = db.collection("customers");
 
     if (!userDetails.email.includes("@")) {
-      invalid("Invalid email");
+      invalid("Invalid email")
       throw new Error("Invalid email");
     }
 
     if (await customersCol.findOne({ email: userDetails.email })) {
       invalid("User already exists please log in");
       throw new Error("User already exists please log in");
-    }
-
-    if (
-      userDetails.mobileNumber.replaceAll(" ", "").length !== 10 ||
-      userDetails.mobileNumber.startsWith("0") == false
-    ) {
-      invalid("Phone number is invalid");
-      throw new Error("Phone number is invalid");
     }
 
     if (userDetails.password.length < 8) {
@@ -165,10 +157,7 @@ app.post("/customersSignUp", async (req, res) => {
       );
     }
 
-    if (userDetails.password !== userDetails.confirmPassword) {
-      invalid("Passwords do not match");
-      throw new Error("Passwords do not match");
-    }
+    
 
     await transporter.sendMail({
       from:"deesdesigns465@gmail.com",
@@ -239,7 +228,6 @@ app.post("/customersSignUp", async (req, res) => {
 
     userDetails.password = base64.encode(userDetails.password);
 
-    delete userDetails.confirmPassword;
     const newUser = await customersCol.insertOne({
       ...userDetails,
     });
@@ -298,11 +286,6 @@ app.post("/designersSignUp", async (req, res) => {
       throw new Error(
         "Password should include numbers and letters and symbols"
       );
-    }
-
-    if (userDetails.password !== userDetails.confirmPassword) {
-      invalid("Passwords do not match");
-      throw new Error("Passwords do not match");
     }
 
     if (
@@ -382,7 +365,6 @@ app.post("/designersSignUp", async (req, res) => {
 
     userDetails.password = base64.encode(userDetails.password);
 
-    delete userDetails.confirmPassword;
     const pfpPath = userDetails.pfpPath;
 
     const newUser = await designersCol.insertOne({
@@ -652,6 +634,26 @@ app.post("/addToCart", async (req, res) => {
     res.status(200).json(cartItem);
   } catch (error) {
     console.error("Error adding to cart: ", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.post("/updateCartItem/:cartId", async (req, res) => {
+  try {
+    const cartId = req.params.cartId;
+    const updatedItem = req.body;
+    delete updatedItem._id
+    const result = await db
+      .collection("cart")
+      .updateOne({ _id: new mongodb.ObjectId(cartId) }, { $set: updatedItem });
+
+    if (result.modifiedCount) {
+      res.status(200).json({ message: "Cart item updated successfully" });
+    } else {
+      throw new Error("Failed to update cart item");
+    }
+  } catch (error) {
+    console.error("Error updating cart item: ", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
